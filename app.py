@@ -9,7 +9,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Step-by-Step GUI")
-        self.setWindowState(Qt.WindowFullScreen)
+        self.setWindowState(Qt.WindowState.WindowFullScreen)
         self.current_page = None
 
         self.main_layout = QVBoxLayout()
@@ -21,19 +21,19 @@ class MainWindow(QMainWindow):
 
         self.show_page(Page1)
 
-    def show_page(self, page_class):
+    def show_page(self, page_class: type[QWidget]):
         if self.current_page is not None:
             self.main_layout.removeWidget(self.current_page)
             self.current_page.deleteLater()
 
-        self.current_page = page_class(self)
+        self.current_page = page_class(self, self.next_page, self.exit_application)
         self.main_layout.insertWidget(0, self.current_page)
 
     def next_page(self):
         if isinstance(self.current_page, Page1):
             self.show_page(Page2)
         elif isinstance(self.current_page, Page2):
-            None
+            pass
 
     def exit_application(self):
         self.close()

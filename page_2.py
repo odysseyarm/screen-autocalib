@@ -1,12 +1,15 @@
+from typing import Callable
 import cv2
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QStackedLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
 
 class Page2(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None]):
         super().__init__(parent)
         self.main_window = parent
+        self.next_page = next_page
+        self.exit_application = exit_application
         self.init_ui()
 
     def init_ui(self):
@@ -18,7 +21,7 @@ class Page2(QWidget):
         self.initial_widget.setLayout(self.initial_layout)
 
         self.instructions_label = QLabel("Press 'Calibrate' to initiate or redo automatic calibration. In three seconds or less, the calibration will be complete and the results will be displayed.")
-        self.instructions_label.setAlignment(Qt.AlignCenter)
+        self.instructions_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.initial_layout.addWidget(self.instructions_label)
 
         self.go_button = QPushButton("Go")
@@ -27,11 +30,11 @@ class Page2(QWidget):
 
         self.next_button = QPushButton("Done")
         self.next_button.setEnabled(False)
-        self.next_button.clicked.connect(self.main_window.next_page)
+        self.next_button.clicked.connect(self.next_page)
         self.initial_layout.addWidget(self.next_button)
 
         self.exit_button = QPushButton("Exit")
-        self.exit_button.clicked.connect(self.main_window.exit_application)
+        self.exit_button.clicked.connect(self.exit_application)
         self.initial_layout.addWidget(self.exit_button)
 
         self.stacked_layout.addWidget(self.initial_widget)
@@ -43,7 +46,7 @@ class Page2(QWidget):
         self.charuco_widget.setLayout(self.charuco_layout)
 
         self.label = QLabel()
-        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.charuco_layout.addWidget(self.label)
 
         self.stacked_layout.addWidget(self.charuco_widget)
@@ -70,7 +73,7 @@ class Page2(QWidget):
 
         height, width = board_image.shape
         bytes_per_line = width
-        qt_image = QImage(board_image.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        qt_image = QImage(board_image.data, width, height, bytes_per_line, QImage.Format.Format_Grayscale8)
         pixmap = QPixmap.fromImage(qt_image)
 
         self.label.setPixmap(pixmap)
