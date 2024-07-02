@@ -1,11 +1,31 @@
-from typing import Callable, Optional, List
-import cv2
 import numpy as np
+import cv2
 import pyrealsense2 as rs
+from typing import List, Dict, Tuple, Callable, Optional
 import matplotlib.pyplot as plt
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout, QHBoxLayout
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
+from mathstuff import *
+
+def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray]:
+    points = {}
+    id = 0
+    for y in range(board_size[1]):
+        for x in range(board_size[0]):
+            points[id] = np.array([x * square_length, y * square_length])
+            id += 1
+    return points
+
+def extract_3d_points(charuco_corners, depth_frame) -> List[np.ndarray]:
+    depth_intrinsics = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
+    points_3d = []
+    for corner in charuco_corners:
+        u, v = corner.ravel()
+        depth = depth_frame.get_distance(int(u), int(v))
+        point_3d = np.array(rs.rs2_deproject_pixel_to_point(depth_intrinsics, [u, v], depth))
+        points_3d.append(point_3d)
+    return points_3d
 
 class Page3(QWidget):
     def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[rs.pipeline]) -> None:
@@ -34,7 +54,7 @@ class Page3(QWidget):
         self.go_button.clicked.connect(self.on_go_clicked)
         self.initial_layout.addWidget(self.go_button)
 
-        self.results_layout = QHBoxLayout()
+        self.results_layout = QVBoxLayout()
 
         self.rgb_label = QLabel()
         self.rgb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -133,20 +153,112 @@ class Page3(QWidget):
             cv2.aruco.drawDetectedMarkers(color_image, marker_corners, marker_ids)
             cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners, charuco_ids)
 
+            # Extract 3D points from the depth frame
+            points_3d = extract_3d_points(charuco_corners, filtered_depth_frame)
+
+            # Define the expected positions of the ChArUco board corners
+            charuco_board_2d_points = define_charuco_board_2d_points((11, 7), 0.04)
+
+            # Normalize the expected positions to the unit square
+            charuco_board_2d_points = {id_: point / 0.04 for id_, point in charuco_board_2d_points.items()}
+
+            # Filter expected points and detected points based on IDs
+            expected_points = []
+            detected_points = []
+            for i, id_ in enumerate(charuco_ids):
+                if id_[0] in charuco_board_2d_points:
+                    expected_points.append(charuco_board_2d_points[id_[0]])
+                    detected_points.append(points_3d[i])
+
+            expected_points = np.array(expected_points, dtype=np.float32)
+            detected_points = np.array(detected_points, dtype=np.float32)
+
+            # Fit a plane using the custom plane fitting function
+            plane = plane_from_points(points_3d)
+
+            # Deproject the detected points to the 3D plane
+            deprojected_points = []
+            intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
+            for detected_point in detected_points:
+                x, y, _ = detected_point
+                deprojected_point = approximate_intersection(plane, intrin, x, y, 0, 1000)
+                deprojected_points.append(deprojected_point)
+
+            deprojected_points = np.array(deprojected_points)
+
+            # Ensure deprojected_points are distinct
+            if len(np.unique(deprojected_points, axis=0)) <= 1:
+                print("Error: Deprojected points are not distinct.")
+                return
+
+            # Find transformation matrix that aligns the plane with the XY plane
+            transformation_matrix = compute_transformation_matrix(plane)
+
+            # Apply the transformation to the detected points
+            transformed_points = apply_transformation(deprojected_points, transformation_matrix)
+
+            # Map the unit square corners to the plane's coordinate system using homography
+            h, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
+
+            if h is None:
+                print("Error: Homography could not be computed.")
+                return
+
+            # Define the unit square corners
+            normalized_corners = np.array([
+                [0, 0],
+                [1, 0],
+                [1, 1],
+                [0, 1]
+            ], dtype=np.float32)
+
+            # Map the unit square corners to the plane's coordinate system using homography
+            transformed_unit_square_2d = cv2.perspectiveTransform(normalized_corners.reshape(-1,1,2), h)
+
+            # Transform the resulting 2D points back to the 3D plane
+            transformed_unit_square_2d = transformed_unit_square_2d.reshape(-1, 2)
+            transformed_unit_square_3d = np.hstack([transformed_unit_square_2d, np.zeros((transformed_unit_square_2d.shape[0], 1))])
+            best_quad = apply_transformation(transformed_unit_square_3d, np.linalg.inv(transformation_matrix))
+
+            # project best_quad edges to the image
+            best_quad_2d = []
+            for point in best_quad:
+                point_2d = rs.rs2_project_point_to_pixel(intrin, point)
+                best_quad_2d.append(point_2d)
+
+            best_quad_2d = np.array(best_quad_2d, dtype=np.int32)
+
+            print(best_quad)
+            print(best_quad_2d)
+
+            # Draw the best quad on the image
+            cv2.polylines(color_image, [best_quad_2d], isClosed=True, color=(0, 255, 0), thickness=2)
+
             # Show RGB image with detected parts
             height, width, channel = color_image.shape
             bytes_per_line = 3 * width
-            qt_image = QImage(color_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            qt_image = QImage(color_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
             scaled_pixmap = pixmap.scaled(self.main_window.size() / 2, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.rgb_label.setPixmap(scaled_pixmap)
 
-            # Show Matplotlib 3D plot of detected corners with swapped Z and Y axes
+            # Show Matplotlib 3D plot of detected best quad corners with swapped Z and Y axes
             fig = plt.figure()
             ax = fig.add_subplot(111, projection='3d')
-            points_3d = self.project_to_3d(charuco_corners, filtered_depth_frame)
-            for point in points_3d:
+
+            for point in best_quad:
                 ax.scatter(point[0], point[2], -point[1], c='r', marker='o')  # Swap Y and Z, reverse Y
+
+            # Draw best quad to the plot
+            for i in range(4):
+                ax.plot([best_quad[i][0], best_quad[(i + 1) % 4][0]],
+                        [best_quad[i][2], best_quad[(i + 1) % 4][2]],
+                        [-best_quad[i][1], -best_quad[(i + 1) % 4][1]], 'g')
+
+            # Now also draw the detected chessboard corner 3d points in the plot
+            for point in points_3d:
+                ax.scatter(point[0], point[2], -point[1], c='b', marker='x')
+
             ax.set_xlabel('X')
             ax.set_ylabel('Z')
             ax.set_zlabel('Y')
@@ -154,7 +266,7 @@ class Page3(QWidget):
             fig.canvas.draw()
             width, height = fig.canvas.get_width_height()
             matplotlib_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
-            qt_image = QImage(matplotlib_image.data, width, height, QImage.Format_RGB888)
+            qt_image = QImage(matplotlib_image.data, width, height, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
             scaled_pixmap = pixmap.scaled(self.main_window.size() / 2, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.matplotlib_label.setPixmap(scaled_pixmap)
@@ -165,18 +277,3 @@ class Page3(QWidget):
             self.next_button.setEnabled(True)
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
-
-    def project_to_3d(self, charuco_corners: np.ndarray, depth_frame: rs.depth_frame) -> List[np.ndarray]:
-        depth_intrinsics = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
-        points_3d = []
-        for corner in charuco_corners:
-            u, v = corner.ravel()
-            depth = depth_frame.get_distance(int(u), int(v))
-            point_3d = np.array(rs.rs2_deproject_pixel_to_point(depth_intrinsics, [u, v], depth))
-            points_3d.append(point_3d)
-        return points_3d
-
-    def hide_charuco_board(self) -> None:
-        self.label.clear()
-        self.stacked_layout.setCurrentWidget(self.initial_widget)
-        self.next_button.setEnabled(True)
