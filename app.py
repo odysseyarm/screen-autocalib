@@ -1,45 +1,77 @@
 import sys
-from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-from PySide6.QtCore import Qt
-
-from page_1 import Page1
-from page_2 import Page2
+import pyrealsense2 as rs
+from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
+from page1 import Page1
+from page2 import Page2
+from page3 import Page3
+import argparse
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Step-by-Step GUI")
-        self.setWindowState(Qt.WindowState.WindowFullScreen)
-        self.current_page = None
 
-        self.main_layout = QVBoxLayout()
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.stacked_widget = QStackedWidget()
+        self.setCentralWidget(self.stacked_widget)
 
-        self.container = QWidget()
-        self.container.setLayout(self.main_layout)
-        self.setCentralWidget(self.container)
+        self.pipeline: Optional[rs.pipeline] = None
 
-        self.show_page(Page1)
+        # Create instances of pages
+        self.page1 = Page1(self, self.init_pipeline, self.exit_application)
+        self.page2 = Page2(self, self.goto_page3, self.exit_application)
+        self.page3 = Page3(self, self.goto_page2, self.exit_application, self.pipeline)
 
-    def show_page(self, page_class: type[QWidget]):
-        if self.current_page is not None:
-            self.main_layout.removeWidget(self.current_page)
-            self.current_page.deleteLater()
+        self.stacked_widget.addWidget(self.page1)
+        self.stacked_widget.addWidget(self.page2)
+        self.stacked_widget.addWidget(self.page3)
 
-        self.current_page = page_class(self, self.next_page, self.exit_application)
-        self.main_layout.insertWidget(0, self.current_page)
+        self.stacked_widget.setCurrentWidget(self.page1)
+        self.showFullScreen()
 
-    def next_page(self):
-        if isinstance(self.current_page, Page1):
-            self.show_page(Page2)
-        elif isinstance(self.current_page, Page2):
-            pass
+    def init_pipeline(self) -> None:
+        # Initialize the RealSense pipeline
+        self.pipeline = rs.pipeline()
+        config = rs.config()
+        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+        self.pipeline_profile = self.pipeline.start(config)
 
-    def exit_application(self):
-        self.close()
+        # Create and configure a temporal filter
+        self.temporal_filter = rs.temporal_filter()
+        self.align = rs.align(rs.stream.color)
+
+        # Pass the pipeline and filter to Page3
+        self.page3.pipeline = self.pipeline
+        self.page3.temporal_filter = self.temporal_filter
+        self.page3.align = self.align
+
+        self.goto_page2()
+
+    def goto_page3(self) -> None:
+        self.stacked_widget.setCurrentWidget(self.page3)
+
+    def goto_page2(self) -> None:
+        self.stacked_widget.setCurrentWidget(self.page2)
+
+    def exit_application(self) -> None:
+        if hasattr(self, 'pipeline') and self.pipeline:
+            self.pipeline.stop()
+        sys.exit()
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='RealSense Camera GUI')
+    parser.add_argument('--display', type=int, default=0, help='Display index to use')
+    args = parser.parse_args()
+
     app = QApplication(sys.argv)
+
+    screens = QApplication.screens()
+    if args.display < 0 or args.display >= len(screens):
+        print(f"Display index {args.display} is out of range. Using default display 0.")
+        args.display = 0
+    screen = screens[args.display]
+
     window = MainWindow()
-    window.show()
+    window.setGeometry(screen.availableGeometry())
+    window.showFullScreen()
+    window.windowHandle().setScreen(screen)
     sys.exit(app.exec())

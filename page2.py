@@ -1,19 +1,19 @@
-from typing import Callable
+from typing import Callable, Optional
 import pyrealsense2 as rs
 import numpy as np
 import cv2
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, QEvent
 from PySide6.QtGui import QImage, QPixmap, QPen, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QHBoxLayout, QLabel
 
 class BracketOverlay(QWidget):
-    def __init__(self, parent: QWidget):
+    def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.pen = QPen(Qt.GlobalColor.red, 5)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
 
-    def paintEvent(self, event: QPaintEvent):
+    def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setPen(self.pen)
 
@@ -36,15 +36,16 @@ class BracketOverlay(QWidget):
         painter.drawLine(window_width - 50, window_height - 1, window_width - 1, window_height - 1)
         painter.drawLine(window_width - 1, window_height - 50, window_width - 1, window_height - 1)
 
-class Page1(QWidget):
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None]):
+class Page2(QWidget):
+    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None]) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.next_page = next_page
         self.exit_application = exit_application
+        self.pipeline: Optional[rs.pipeline] = None
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         self.canvas = QGraphicsView()
@@ -55,7 +56,6 @@ class Page1(QWidget):
         self.canvas.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self.canvas)
 
-        self.pipeline = None
         self.camera_pixmap_item = QGraphicsPixmapItem()
         self.scene.addItem(self.camera_pixmap_item)
 
@@ -84,17 +84,13 @@ class Page1(QWidget):
         self.timer.timeout.connect(self.check_realsense_device)
         self.timer.start(1000)
 
-    def check_realsense_device(self):
-        context = rs.context()
-        if len(context.query_devices()) > 0:
+    def check_realsense_device(self) -> None:
+        if self.main_window.pipeline is not None:
+            self.pipeline = self.main_window.pipeline
             self.start_steps()
 
-    def start_steps(self):
+    def start_steps(self) -> None:
         self.timer.stop()
-        self.pipeline = rs.pipeline()
-        config = rs.config()
-        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-        self.pipeline.start(config)
 
         self.video_timer = QTimer(self)
         self.video_timer.timeout.connect(self.update_camera_preview)
@@ -102,14 +98,14 @@ class Page1(QWidget):
 
         self.next_button.setVisible(True)
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event: QEvent) -> None:
         super().resizeEvent(event)
         if hasattr(self, 'camera_pixmap_item') and self.camera_pixmap_item:
             self.canvas.setSceneRect(0, 0, self.width(), self.height())
             self.bracket_overlay.resize(self.size())
             self.update_camera_preview()
 
-    def update_camera_preview(self):
+    def update_camera_preview(self) -> None:
         if not self.pipeline:
             return
 
