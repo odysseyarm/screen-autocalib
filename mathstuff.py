@@ -1,30 +1,16 @@
 import numpy as np
 import pyrealsense2 as rs
-from typing import List
+from typing import Any, List, Literal, Tuple, cast
 
-def plane_from_points(points):
-    # Ensure points is a numpy array
-    points = np.array(points)
-    
-    # Calculate the centroid
-    centroid = np.mean(points, axis=0)
-    
-    # Center the points around the centroid
-    centered_points = points - centroid
-    
-    # Calculate the covariance matrix
-    covariance_matrix = np.cov(centered_points, rowvar=False)
-    
-    # Calculate the eigenvalues and eigenvectors of the covariance matrix
-    eigenvalues, eigenvectors = np.linalg.eig(covariance_matrix)
-    
-    # Find the smallest eigenvalue and its corresponding eigenvector
-    smallest_eigenvalue_index = np.argmin(eigenvalues)
-    plane_normal = eigenvectors[:, smallest_eigenvalue_index]
-    
-    return centroid, plane_normal
+def plane_from_points(points: List[np.ndarray[Literal[3], np.dtype[np.float32]]]):
+    centroid = cast(np.ndarray[Literal[3], np.dtype[np.float32]], np.mean(points, axis=0))
+    points_centered = cast(np.ndarray[Literal[3], np.dtype[np.float32]], points - centroid)
+    covariance_matrix = cast(np.ndarray[Literal[3, 3], np.dtype[np.float32]], np.dot(points_centered.T, points_centered))
+    _, eigenvectors = cast(Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3, 3], np.dtype[np.float32]]], np.linalg.eig(covariance_matrix))
+    normal = eigenvectors[:, np.argmin(np.linalg.norm(eigenvectors, axis=0))]
+    return (centroid, normal)
 
-def compute_transformation_matrix(plane: np.ndarray) -> np.ndarray:
+def compute_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]) -> np.ndarray[Literal[4, 4], np.dtype[np.float64]]:
     normal = plane[1]
     d = plane[0]
     z_axis = normal / np.linalg.norm(normal)
@@ -42,16 +28,16 @@ def compute_transformation_matrix(plane: np.ndarray) -> np.ndarray:
 
     return transformation_matrix
 
-def apply_transformation(points: np.ndarray, transformation: np.ndarray) -> np.ndarray:
-    points_homogeneous = np.hstack([points, np.ones((points.shape[0], 1))])
-    transformed_points = points_homogeneous.dot(transformation.T)
-    return transformed_points[:, :3]
+def apply_transformation(points: np.ndarray[Any, np.dtype[np.float32]], transformation_matrix: np.ndarray[Literal[4, 4], np.dtype[np.float64]]) -> np.ndarray[Any, np.dtype[np.float32]]:
+    points = np.hstack([points, np.ones((points.shape[0], 1), dtype=np.float32)])
+    points = np.dot(transformation_matrix, points.T).T
+    return points[:, :3]
 
-def evaluate_plane(plane, point):
+def evaluate_plane(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], point: np.ndarray[Literal[3], np.dtype[np.float32]]) -> np.float32:
     centroid, normal = plane
     return np.dot(normal, point - centroid)
 
-def approximate_intersection(plane, intrin, x, y, min_z, max_z, epsilon=1e-3):
+def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-3):
     def deproject(x, y, z):
         return np.array(rs.rs2_deproject_pixel_to_point(intrin, [x, y], z))
     

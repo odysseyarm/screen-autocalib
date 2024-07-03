@@ -1,15 +1,15 @@
 import numpy as np
 import cv2
 import pyrealsense2 as rs
-from typing import List, Dict, Tuple, Callable, Optional
+from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
 import matplotlib.pyplot as plt
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
 from mathstuff import *
 
-def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray]:
-    points = {}
+def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]:
+    points = dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]()
     id = 0
     for y in range(board_size[1]):
         for x in range(board_size[0]):
@@ -17,14 +17,17 @@ def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: f
             id += 1
     return points
 
-def extract_3d_points(charuco_corners, depth_frame) -> List[np.ndarray]:
+def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_frame: rs.depth_frame) -> List[np.ndarray[Literal[3], np.dtype[np.float32]]]:
     depth_intrinsics = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
-    points_3d = []
+    points_3d = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
+
+    corner: np.ndarray[Literal[2], np.dtype[np.float32]]
     for corner in charuco_corners:
         u, v = corner.ravel()
         depth = depth_frame.get_distance(int(u), int(v))
-        point_3d = np.array(rs.rs2_deproject_pixel_to_point(depth_intrinsics, [u, v], depth))
+        point_3d = np.array(rs.rs2_deproject_pixel_to_point(depth_intrinsics, [u, v], depth), dtype=np.float32)
         points_3d.append(point_3d)
+
     return points_3d
 
 class Page3(QWidget):
@@ -94,7 +97,7 @@ class Page3(QWidget):
     def on_go_clicked(self) -> None:
         self.show_charuco_board()
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
-        QTimer.singleShot(3000, self.detect_charuco_corners)
+        QTimer.singleShot(3000, self.detect_charuco_corners) # type: ignore
 
     def show_charuco_board(self) -> None:
         # Create the ChArUco board
@@ -109,7 +112,7 @@ class Page3(QWidget):
 
         height, width = board_image.shape[:2]
         bytes_per_line = width
-        qt_image = QImage(board_image.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+        qt_image = QImage(board_image.data, width, height, bytes_per_line, QImage.Format.Format_Grayscale8)
         pixmap = QPixmap.fromImage(qt_image)
 
         self.label.setPixmap(pixmap)
@@ -147,7 +150,9 @@ class Page3(QWidget):
         charuco_detector = cv2.aruco.CharucoDetector(board, charuco_parameters, detector_parameters)
 
         gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+
         charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
+        charuco_ids = cast(Optional[cv2.typing.MatLike], charuco_ids) # OpenCV typings are missing "| None" in several places
 
         if charuco_ids is not None:
             cv2.aruco.drawDetectedMarkers(color_image, marker_corners, marker_ids)
@@ -163,8 +168,8 @@ class Page3(QWidget):
             charuco_board_2d_points = {id_: point / 0.04 for id_, point in charuco_board_2d_points.items()}
 
             # Filter expected points and detected points based on IDs
-            expected_points = []
-            detected_points = []
+            expected_points = list[np.ndarray[Literal[2], np.dtype[np.float32]]]()
+            detected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
             for i, id_ in enumerate(charuco_ids):
                 if id_[0] in charuco_board_2d_points:
                     expected_points.append(charuco_board_2d_points[id_[0]])
@@ -177,7 +182,7 @@ class Page3(QWidget):
             plane = plane_from_points(points_3d)
 
             # Deproject the detected points to the 3D plane
-            deprojected_points = []
+            deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
             intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
             for detected_point in detected_points:
                 x, y, _ = detected_point
@@ -199,6 +204,7 @@ class Page3(QWidget):
 
             # Map the unit square corners to the plane's coordinate system using homography
             h, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
+            h = cast(Optional[cv2.typing.MatLike], h) # OpenCV typings are missing "| None" in several places
 
             if h is None:
                 print("Error: Homography could not be computed.")
@@ -216,8 +222,9 @@ class Page3(QWidget):
             transformed_unit_square_2d = cv2.perspectiveTransform(normalized_corners.reshape(-1,1,2), h)
 
             # Transform the resulting 2D points back to the 3D plane
-            transformed_unit_square_2d = transformed_unit_square_2d.reshape(-1, 2)
-            transformed_unit_square_3d = np.hstack([transformed_unit_square_2d, np.zeros((transformed_unit_square_2d.shape[0], 1))])
+            transformed_unit_square_3d = transformed_unit_square_2d.reshape(-1, 2)
+            transformed_unit_square_3d = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_unit_square_3d)
+            transformed_unit_square_3d = np.hstack([transformed_unit_square_3d, np.zeros((4, 1), dtype=np.float32)])
             best_quad = apply_transformation(transformed_unit_square_3d, np.linalg.inv(transformation_matrix))
 
             # project best_quad edges to the image
