@@ -178,15 +178,18 @@ class Page3(QWidget):
             expected_points = np.array(expected_points, dtype=np.float32)
             detected_points = np.array(detected_points, dtype=np.float32)
 
+            print("detected points")
+            print(detected_points)
+
             # Fit a plane using the custom plane fitting function
             plane = plane_from_points(points_3d)
 
             # Deproject the detected points to the 3D plane
             deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
             intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
-            for detected_point in detected_points:
-                x, y, _ = detected_point
-                deprojected_point = approximate_intersection(plane, intrin, x, y, 0, 1000)
+            for detected_point in charuco_corners:
+                print(detected_point)
+                deprojected_point = approximate_intersection(plane, intrin, detected_point[0][0], detected_point[0][1], 0, 1000)
                 deprojected_points.append(deprojected_point)
 
             deprojected_points = np.array(deprojected_points)
@@ -196,11 +199,17 @@ class Page3(QWidget):
                 print("Error: Deprojected points are not distinct.")
                 return
 
+            print("before transformation")
+            print(deprojected_points)
+
             # Find transformation matrix that aligns the plane with the XY plane
             transformation_matrix = compute_transformation_matrix(plane)
 
             # Apply the transformation to the detected points
             transformed_points = apply_transformation(deprojected_points, transformation_matrix)
+
+            print("after transformation")
+            print(transformed_points)
 
             # Map the unit square corners to the plane's coordinate system using homography
             h, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
