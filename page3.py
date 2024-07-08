@@ -11,8 +11,8 @@ from mathstuff import *
 def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]:
     points = dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]()
     id = 0
-    for y in range(board_size[1]):
-        for x in range(board_size[0]):
+    for y in range(board_size[1]-1):
+        for x in range(board_size[0]-1):
             points[id] = np.array([x * square_length, y * square_length])
             id += 1
     return points
@@ -184,6 +184,9 @@ class Page3(QWidget):
             # Fit a plane using the custom plane fitting function
             plane = plane_from_points(points_3d)
 
+            print("plane")
+            print(plane)
+
             # Deproject the detected points to the 3D plane
             deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
             intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
@@ -199,8 +202,8 @@ class Page3(QWidget):
                 print("Error: Deprojected points are not distinct.")
                 return
 
-            print("before transformation")
-            print(deprojected_points)
+            # print("before transformation")
+            # print(deprojected_points)
 
             # Find transformation matrix that aligns the plane with the XY plane
             transformation_matrix = compute_transformation_matrix(plane)
@@ -208,12 +211,22 @@ class Page3(QWidget):
             # Apply the transformation to the detected points
             transformed_points = apply_transformation(deprojected_points, transformation_matrix)
 
-            print("after transformation")
+            # print("after transformation")
+            # print(transformed_points)
+
+            print("expected points")
+            print(expected_points)
+
+            print("---")
+
+            print("transformed points")
             print(transformed_points)
 
             # Map the unit square corners to the plane's coordinate system using homography
             h, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
             h = cast(Optional[cv2.typing.MatLike], h) # OpenCV typings are missing "| None" in several places
+
+            print(h)
 
             if h is None:
                 print("Error: Homography could not be computed.")
@@ -221,10 +234,10 @@ class Page3(QWidget):
 
             # Define the unit square corners
             normalized_corners = np.array([
-                [0, 0],
-                [1, 0],
-                [1, 1],
-                [0, 1]
+                [-1, -1],
+                [10, -1],
+                [10, 6],
+                [-1, 6]
             ], dtype=np.float32)
 
             # Map the unit square corners to the plane's coordinate system using homography
