@@ -2,13 +2,15 @@ import numpy as np
 import pyrealsense2 as rs
 from typing import Any, List, Literal, Tuple, cast
 
-def plane_from_points(points: List[np.ndarray[Literal[3], np.dtype[np.float32]]]):
+def plane_from_points(points: List[np.ndarray[Literal[3], np.dtype[np.float32]]]) -> Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]:
     centroid = cast(np.ndarray[Literal[3], np.dtype[np.float32]], np.mean(points, axis=0))
     points_centered = cast(np.ndarray[Literal[3], np.dtype[np.float32]], points - centroid)
-    covariance_matrix = cast(np.ndarray[Literal[3, 3], np.dtype[np.float32]], np.dot(points_centered.T, points_centered))
-    _, eigenvectors = cast(Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3, 3], np.dtype[np.float32]]], np.linalg.eig(covariance_matrix))
-    normal = eigenvectors[:, np.argmin(np.linalg.norm(eigenvectors, axis=0))]
-    return (centroid, normal)
+
+    # Perform Singular Value Decomposition (SVD)
+    _, _, vh = np.linalg.svd(points_centered)
+
+    normal = vh[-1, :]  # The normal vector is the last row of vh matrix
+    return centroid, normal
 
 def compute_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]) -> np.ndarray[Literal[4, 4], np.dtype[np.float64]]:
     normal = plane[1]
