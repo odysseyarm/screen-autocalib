@@ -87,19 +87,20 @@ class Page3(QWidget):
         self.charuco_widget.setLayout(self.charuco_layout)
 
         self.label = QLabel()
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.charuco_layout.addWidget(self.label)
 
         self.stacked_layout.addWidget(self.charuco_widget)
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
+    def resizeEvent(self, event: Any) -> None:
+        self.create_charuco_board()
+
     def on_go_clicked(self) -> None:
-        self.show_charuco_board()
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
         QTimer.singleShot(3000, self.detect_charuco_corners) # type: ignore
 
-    def show_charuco_board(self) -> None:
+    def create_charuco_board(self) -> None:
         # Create the ChArUco board
         aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         board = cv2.aruco.CharucoBoard((11, 7), 0.04, 0.02, aruco_dict)
@@ -178,22 +179,15 @@ class Page3(QWidget):
             expected_points = np.array(expected_points, dtype=np.float32)
             detected_points = np.array(detected_points, dtype=np.float32)
 
-            print("detected points")
-            print(detected_points)
-
             points_3d = np.array(points_3d)
 
             # Fit a plane using the custom plane fitting function
             plane = plane_from_points(points_3d)
 
-            print("plane")
-            print(plane)
-
             # Deproject the detected points to the 3D plane
             deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
             intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
             for detected_point in charuco_corners:
-                print(detected_point)
                 deprojected_point = approximate_intersection(plane, intrin, detected_point[0][0], detected_point[0][1], 0, 1000)
                 deprojected_points.append(deprojected_point)
 
@@ -216,19 +210,9 @@ class Page3(QWidget):
             # print("after transformation")
             # print(transformed_points)
 
-            print("expected points")
-            print(expected_points)
-
-            print("---")
-
-            print("transformed points")
-            print(transformed_points)
-
             # Map the unit square corners to the plane's coordinate system using homography
             h, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
             h = cast(Optional[cv2.typing.MatLike], h) # OpenCV typings are missing "| None" in several places
-
-            print(h)
 
             if h is None:
                 print("Error: Homography could not be computed.")
@@ -259,9 +243,6 @@ class Page3(QWidget):
 
             best_quad_2d = np.array(best_quad_2d, dtype=np.int32)
 
-            print(best_quad)
-            print(best_quad_2d)
-
             # Draw the best quad on the image
             cv2.polylines(color_image, [best_quad_2d], isClosed=True, color=(0, 255, 0), thickness=2)
 
@@ -270,7 +251,7 @@ class Page3(QWidget):
             bytes_per_line = 3 * width
             qt_image = QImage(color_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
-            scaled_pixmap = pixmap.scaled(self.main_window.size() / 2, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(self.main_window.size() / 4, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.rgb_label.setPixmap(scaled_pixmap)
 
             # Show Matplotlib 3D plot of detected best quad corners with swapped Z and Y axes
@@ -299,7 +280,7 @@ class Page3(QWidget):
             matplotlib_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
             qt_image = QImage(matplotlib_image.data, width, height, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
-            scaled_pixmap = pixmap.scaled(self.main_window.size() / 2, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(self.main_window.size() / 4, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.matplotlib_label.setPixmap(scaled_pixmap)
 
             plt.close(fig)
