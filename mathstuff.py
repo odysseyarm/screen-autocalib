@@ -1,15 +1,48 @@
 import numpy as np
+import numpy.typing as npt
 import pyrealsense2 as rs
 from typing import Any, List, Literal, Tuple, cast
+from skspatial.objects import Plane
+from sklearn.linear_model import RANSACRegressor
+from sklearn.base import BaseEstimator, RegressorMixin
 
-def plane_from_points(points: List[np.ndarray[Literal[3], np.dtype[np.float32]]]) -> Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]:
-    centroid = cast(np.ndarray[Literal[3], np.dtype[np.float32]], np.mean(points, axis=0))
-    points_centered = cast(np.ndarray[Literal[3], np.dtype[np.float32]], points - centroid)
+class PlaneModel(BaseEstimator, RegressorMixin):
+    def fit(self, X, y): # type: ignore
+        points = np.c_[X, y]
+        plane = Plane.best_fit(points)
+        self.normal_ = plane.normal
+        self.point_ = plane.point
+        return self
 
-    # Perform Singular Value Decomposition (SVD)
-    _, _, vh = np.linalg.svd(points_centered)
+    def predict(self, X): # type: ignore
+        d = -self.point_.dot(self.normal_)
+        return (-self.normal_[0] * X[:, 0] - self.normal_[1] * X[:, 1] - d) / self.normal_[2] # type: ignore
 
-    normal = vh[-1, :]  # The normal vector is the last row of vh matrix
+def plane_from_points(points: npt.NDArray[np.float32]) -> Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]:
+    # Prepare data for RANSAC
+    X = points[:, :2]  # X and Y coordinates
+    y = points[:, 2]   # Z coordinate
+
+    # Fit RANSAC regressor with PlaneModel
+    ransac = RANSACRegressor(
+        PlaneModel(), 
+        min_samples=15,  # Minimum number of samples to define a plane
+        residual_threshold=0.01, 
+        max_trials=10000
+    )
+    ransac.fit(X, y)
+
+    # Extract inlier points
+    inlier_mask = ransac.inlier_mask_ # type: ignore
+    inliers = points[inlier_mask]
+    
+    # Use skspatial to find the best fitting plane for the inliers
+    plane = Plane.best_fit(inliers)
+
+    # Extract centroid and normal from the fitted plane
+    centroid = plane.point
+    normal = plane.normal
+
     return centroid, normal
 
 def compute_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]) -> np.ndarray[Literal[4, 4], np.dtype[np.float64]]:
@@ -56,15 +89,15 @@ def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.flo
         mid_z = (min_z + max_z) / 2
         mid_point = deproject(x, y, mid_z)
         mid_eval = evaluate_plane(plane, mid_point)
-        
+
         if mid_eval == 0:
             return mid_point
-        
+
         if min_eval * mid_eval < 0:
             max_z = mid_z
             max_eval = mid_eval
         else:
             min_z = mid_z
             min_eval = mid_eval
-    
+
     return deproject(x, y, (min_z + max_z) / 2)

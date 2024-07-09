@@ -181,6 +181,8 @@ class Page3(QWidget):
             print("detected points")
             print(detected_points)
 
+            points_3d = np.array(points_3d)
+
             # Fit a plane using the custom plane fitting function
             plane = plane_from_points(points_3d)
 
