@@ -163,10 +163,26 @@ class Page3(QWidget):
             points_3d = extract_3d_points(charuco_corners, filtered_depth_frame)
 
             # Define the expected positions of the ChArUco board corners
-            charuco_board_2d_points = define_charuco_board_2d_points((11, 7), 0.04)
+            charuco_board_2d_points = define_charuco_board_2d_points((11, 7), 1)
+
+            screen_width = self.main_window.width()
+            screen_height = self.main_window.height()
+
+            board_aspect_ratio = 11 / 7
+            screen_aspect_ratio = screen_width / screen_height
+
+            board_width_in_pixels = screen_height * board_aspect_ratio
+            board_height_in_pixels = screen_width / board_aspect_ratio
+
+            if screen_aspect_ratio < board_aspect_ratio:
+                scale_x = 0
+                scale_y = (screen_height - board_height_in_pixels) / (board_height_in_pixels / 7)
+            else:
+                scale_x = (screen_width - board_width_in_pixels) / (board_width_in_pixels / 11)
+                scale_y = 0
 
             # Normalize the expected positions to the unit square
-            charuco_board_2d_points = {id_: point / 0.04 for id_, point in charuco_board_2d_points.items()}
+            charuco_board_2d_points = {id_: [(1 + point[0] + scale_x/2) / (11 + scale_x), (1 + point[1] + scale_y/2) / (7 + scale_y)] for id_, point in charuco_board_2d_points.items()}
 
             # Filter expected points and detected points based on IDs
             expected_points = list[np.ndarray[Literal[2], np.dtype[np.float32]]]()
@@ -220,10 +236,10 @@ class Page3(QWidget):
 
             # Define the unit square corners
             normalized_corners = np.array([
-                [-1, -1],
-                [10, -1],
-                [10, 6],
-                [-1, 6]
+                [0, 0],
+                [1, 0],
+                [1, 1],
+                [0, 1]
             ], dtype=np.float32)
 
             # Map the unit square corners to the plane's coordinate system using homography
