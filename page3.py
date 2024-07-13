@@ -156,8 +156,8 @@ class Page3(QWidget):
         charuco_ids = cast(Optional[cv2.typing.MatLike], charuco_ids) # OpenCV typings are missing "| None" in several places
 
         if charuco_ids is not None:
-            cv2.aruco.drawDetectedMarkers(color_image, marker_corners, marker_ids)
-            cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners, charuco_ids)
+            # cv2.aruco.drawDetectedMarkers(color_image, marker_corners, marker_ids)
+            cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners, charuco_ids, cornerColor=(0, 0, 255))
 
             # Extract 3D points from the depth frame
             points_3d = extract_3d_points(charuco_corners, filtered_depth_frame)
@@ -251,7 +251,7 @@ class Page3(QWidget):
             transformed_unit_square_3d = np.hstack([transformed_unit_square_3d, np.zeros((4, 1), dtype=np.float32)])
             best_quad = apply_transformation(transformed_unit_square_3d, np.linalg.inv(transformation_matrix))
 
-            # project best_quad edges to the image
+            # Project best_quad edges to the image
             best_quad_2d = []
             for point in best_quad:
                 point_2d = rs.rs2_project_point_to_pixel(intrin, point)
@@ -259,15 +259,37 @@ class Page3(QWidget):
 
             best_quad_2d = np.array(best_quad_2d, dtype=np.int32)
 
+            # Find the expected ir marker locations
+            normalized_marker_pattern = marker_pattern()
+            transformed_marker_pattern_3d = cv2.perspectiveTransform(normalized_marker_pattern.reshape(-1,1,2), h).reshape(-1, 2)
+            transformed_marker_pattern_3d = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_marker_pattern_3d)
+            transformed_marker_pattern_3d = np.hstack([transformed_marker_pattern_3d, np.zeros((6, 1), dtype=np.float32)])
+            expected_marker_pattern = apply_transformation(transformed_marker_pattern_3d, np.linalg.inv(transformation_matrix))
+
+            # Project expected_marker_pattern to the image
+            expected_marker_pattern_2d = []
+            for point in expected_marker_pattern:
+                point_2d = rs.rs2_project_point_to_pixel(intrin, point)
+                expected_marker_pattern_2d.append(point_2d)
+
+            expected_marker_pattern_2d = np.array(expected_marker_pattern_2d, dtype=np.int32)
+
+            # TODO - Detect the ir markers based on the expected locations
+            detected_marker_pattern = expected_marker_pattern
+
             # Draw the best quad on the image
             cv2.polylines(color_image, [best_quad_2d], isClosed=True, color=(0, 255, 0), thickness=2)
+
+            # Draw the expected marker pattern on the image as purple outline circles
+            for point in expected_marker_pattern_2d:
+                cv2.circle(color_image, tuple(point), 5, (255, 0, 255), -1)
 
             # Show RGB image with detected parts
             height, width, channel = color_image.shape
             bytes_per_line = 3 * width
             qt_image = QImage(color_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
-            scaled_pixmap = pixmap.scaled(self.main_window.size() / 4, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(self.main_window.size() / 3, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.rgb_label.setPixmap(scaled_pixmap)
 
             # Show Matplotlib 3D plot of detected best quad corners with swapped Z and Y axes
@@ -285,7 +307,10 @@ class Page3(QWidget):
 
             # Now also draw the detected chessboard corner 3d points in the plot
             for point in points_3d:
-                ax.scatter(point[0], point[2], -point[1], c='b', marker='x')
+                ax.scatter(point[0], point[2], -point[1], c='b', marker='x', s=0.5)
+            
+            for point in expected_marker_pattern:
+                ax.scatter(point[0], point[2], -point[1], c='violet', marker='o', s=10)
 
             ax.set_xlabel('X')
             ax.set_ylabel('Z')
@@ -296,7 +321,7 @@ class Page3(QWidget):
             matplotlib_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
             qt_image = QImage(matplotlib_image.data, width, height, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
-            scaled_pixmap = pixmap.scaled(self.main_window.size() / 4, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(self.main_window.size() / 3, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.matplotlib_label.setPixmap(scaled_pixmap)
 
             plt.close(fig)
