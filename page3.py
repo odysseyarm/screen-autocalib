@@ -7,6 +7,10 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
 from mathstuff import *
+from platformdirs import *
+from pathlib import Path
+import io
+import json
 
 def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]:
     points = dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]()
@@ -31,14 +35,14 @@ def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_fra
     return points_3d
 
 class Page3(QWidget):
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[rs.pipeline]) -> None:
+    def __init__(self, parent: QWidget, exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], screen_id: int) -> None:
         super().__init__(parent)
         self.main_window = parent
-        self.next_page = next_page
         self.exit_application = exit_application
         self.pipeline = pipeline
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
+        self.screen_id = screen_id
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -71,7 +75,7 @@ class Page3(QWidget):
 
         self.next_button = QPushButton("Done")
         self.next_button.setEnabled(False)
-        self.next_button.clicked.connect(self.next_page)
+        self.next_button.clicked.connect(self.save_and_exit)
         self.initial_layout.addWidget(self.next_button)
 
         self.exit_button = QPushButton("Exit")
@@ -277,6 +281,11 @@ class Page3(QWidget):
             # TODO - Detect the ir markers based on the expected locations
             detected_marker_pattern = expected_marker_pattern
 
+            # set members for saving
+            self.plane = plane
+            self.homography = h
+            self.object_points = expected_marker_pattern
+
             # Draw the best quad on the image
             cv2.polylines(color_image, [best_quad_2d], isClosed=True, color=(0, 255, 0), thickness=2)
 
@@ -330,3 +339,21 @@ class Page3(QWidget):
             self.next_button.setEnabled(True)
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
+    
+    def save_and_exit(self) -> None:
+        _user_data_dir = Path(user_data_dir("odyssey", "odysseyarm", roaming=True))
+        screens_dir = _user_data_dir.joinpath("screens")
+        if not screens_dir.exists():
+            screens_dir.mkdir(parents=True)
+        screen_path = screens_dir.joinpath(f"screen_{self.screen_id}.json")
+        print(f"Saving calibration data to {screen_path} then exiting")
+        with io.open(screen_path, 'w', encoding='utf-8') as f:
+            f.write(json.dumps({
+                "plane": {
+                    "origin": self.plane[0].tolist(),
+                    "normal": self.plane[1].tolist(),
+                },
+                "homography": self.homography.tolist(),
+                "object_points": self.object_points.tolist(),
+            }))
+        self.exit_application()

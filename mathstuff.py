@@ -106,11 +106,11 @@ def marker_pattern():
     # Define the points using normalized coordinates with (0,0) as the top-left corner
     points = [
         np.array([0.2, 0.15]),
-        np.array([0.25, 0.9]),
-        np.array([0.75, 0.85]),
-        np.array([0.46, 0.08]),
+        np.array([0.25, 0.87]),
+        np.array([0.75, 0.83]),
+        np.array([0.46, 0.2]),
         np.array([0.7, 0.1]),
-        np.array([0.54, 0.92]),
+        np.array([0.5, 0.8]),
     ]
 
     return np.array(points)
