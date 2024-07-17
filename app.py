@@ -11,6 +11,8 @@ class MainWindow(QMainWindow):
     def __init__(self, args: argparse.Namespace) -> None:
         if args.bag:
             self.bag_file = args.bag
+        else:
+            self.bag_file = None
 
         super().__init__()
 
@@ -65,8 +67,7 @@ class MainWindow(QMainWindow):
             self.page3.temporal_filter = self.temporal_filter
             self.page3.align = self.align
 
-            if self.bag_file:
-                self.goto_page2()
+            self.goto_page2()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
