@@ -353,7 +353,7 @@ class Page3(QWidget):
                     "origin": self.plane[0].tolist(),
                     "normal": self.plane[1].tolist(),
                 },
-                "homography": self.homography.tolist(),
+                "homography": self.homography.flatten().tolist(),
                 "object_points": self.object_points.tolist(),
             }))
         self.exit_application()
