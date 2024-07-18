@@ -347,6 +347,7 @@ class Page3(QWidget):
             self.plane = plane_aligned
             self.homography = h_aligned
             self.object_points = detected_marker_pattern_aligned
+            self.xy_transformation_matrix = xy_transformation_matrix_aligned
 
             # Enable the "Done" button after showing the results
             self.next_button.setEnabled(True)
@@ -374,6 +375,7 @@ class Page3(QWidget):
                 },
                 "homography": self.homography.flatten().tolist(),
                 "object_points": self.object_points.tolist(),
+                "xy_transform": self.xy_transformation_matrix.flatten().tolist(),
             }))
         self.exit_application()
 
