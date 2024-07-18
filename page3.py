@@ -351,7 +351,7 @@ class Page3(QWidget):
 
     def get_gravity_vector(self) -> np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]:
         q: np.quaternion = np.quaternion(*self.Q)
-        gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]] = np.array([0, 0, -1], dtype=np.float64)
+        gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]] = np.array([0, 0, 1], dtype=np.float64)
         gravity_vector = quaternion.as_rotation_matrix(q) @ gravity_vector
         return gravity_vector / np.linalg.norm(gravity_vector)
 
