@@ -1,4 +1,5 @@
 import numpy as np
+import quaternion
 import cv2
 import pyrealsense2 as rs
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
@@ -165,7 +166,7 @@ class Page3(QWidget):
             points_3d = extract_3d_points(charuco_corners, depth_frame)
 
             # Calculate the transformation matrix and its inverse to align with gravity
-            align_transform_mtx = self.calculate_gravity_alignment_matrix(self.gravity_vector)
+            align_transform_mtx = calculate_gravity_alignment_matrix(self.gravity_vector)
             align_transform_inv_mtx = np.linalg.inv(align_transform_mtx)
 
             # Align the 3D points with gravity
@@ -350,6 +351,12 @@ class Page3(QWidget):
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
+    def get_gravity_vector(self) -> np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]:
+        q: np.quaternion = np.quaternion(*self.Q)
+        gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]] = np.array([0, 0, -1], dtype=np.float64)
+        gravity_vector = quaternion.as_rotation_matrix(q) @ gravity_vector
+        return gravity_vector / np.linalg.norm(gravity_vector)
+
     def save_and_exit(self) -> None:
         _user_data_dir = Path(user_data_dir("odyssey", "odysseyarm", roaming=True))
         screens_dir = _user_data_dir.joinpath("screens")
@@ -367,40 +374,6 @@ class Page3(QWidget):
                 "object_points": self.object_points.tolist(),
             }))
         self.exit_application()
-
-    def get_gravity_vector(self) -> np.ndarray:
-        quaternion = self.Q
-        gravity_vector = np.array([0, 0, -1])
-        rotation_matrix = self.quaternion_to_rotation_matrix(quaternion)
-        gravity_vector = rotation_matrix @ gravity_vector
-        return gravity_vector / np.linalg.norm(gravity_vector)
-
-    def quaternion_to_rotation_matrix(self, q: np.ndarray) -> np.ndarray:
-        q0, q1, q2, q3 = q
-        return np.array([
-            [1 - 2 * (q2**2 + q3**2), 2 * (q1*q2 - q0*q3), 2 * (q1*q3 + q0*q2)],
-            [2 * (q1*q2 + q0*q3), 1 - 2 * (q1**2 + q3**2), 2 * (q2*q3 - q0*q1)],
-            [2 * (q1*q3 - q0*q2), 2 * (q2*q3 + q0*q1), 1 - 2 * (q1**2 + q2**2)]
-        ])
-
-    def calculate_gravity_alignment_matrix(self, gravity_vector: np.ndarray) -> np.ndarray:
-        # Create a rotation matrix to align Y-axis with the gravity vector
-        y_axis = np.array([0, 1, 0])
-        rotation_axis = np.cross(y_axis, gravity_vector)
-        rotation_axis /= np.linalg.norm(rotation_axis)
-        cos_angle = np.dot(y_axis, gravity_vector)
-        angle = np.arccos(cos_angle)
-        sin_angle = np.sin(angle)
-
-        # Compute the rotation matrix using Rodrigues' rotation formula
-        K = np.array([
-            [0, -rotation_axis[2], rotation_axis[1]],
-            [rotation_axis[2], 0, -rotation_axis[0]],
-            [-rotation_axis[1], rotation_axis[0], 0]
-        ], dtype=np.float32)
-        rotation_matrix = np.eye(3) + sin_angle * K + (1 - cos_angle) * (K @ K)
-
-        return rotation_matrix
 
     def process_frame(self, frames: rs.frame) -> None:
         color_frame = frames.get_color_frame()

@@ -1,5 +1,6 @@
 import numpy as np
 import numpy.typing as npt
+import quaternion
 import pyrealsense2 as rs
 from typing import Any, List, Literal, Tuple, cast
 from skspatial.objects import Plane
@@ -122,6 +123,28 @@ def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.flo
             min_eval = mid_eval
 
     return deproject(x, y, (min_z + max_z) / 2)
+
+def calculate_gravity_alignment_matrix(gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]) -> np.ndarray[Tuple[Literal[3], Literal[3]], np.dtype[np.float64]]:
+    """
+    Create a rotation matrix to align Y-axis with the gravity vector.
+
+    Parameters:
+    gravity_vector (np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]): Gravity vector
+
+    Returns:
+    np.ndarray[Tuple[Literal[3], Literal[3]], np.dtype[np.float64]]: Rotation matrix
+    """
+    y_axis = np.array([0, 1, 0], dtype=np.float64)
+    gravity_vector = gravity_vector / np.linalg.norm(gravity_vector)
+    rotation_axis = np.cross(y_axis, gravity_vector)
+    rotation_axis /= np.linalg.norm(rotation_axis)
+    cos_angle = np.dot(y_axis, gravity_vector)
+    angle = np.arccos(cos_angle)
+    
+    q = np.quaternion(np.cos(angle / 2), *(rotation_axis * np.sin(angle / 2)))
+    rotation_matrix = quaternion.as_rotation_matrix(q)
+
+    return rotation_matrix
 
 def marker_pattern():
     # Define the points using normalized coordinates with (0,0) as the top-left corner
