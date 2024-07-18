@@ -5,6 +5,7 @@ import cv2
 from PySide6.QtCore import QTimer, Qt, QEvent
 from PySide6.QtGui import QImage, QPixmap, QPen, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QHBoxLayout, QLabel
+from data_acquisition import DataAcquisitionThread
 
 class BracketOverlay(QWidget):
     def __init__(self, parent: QWidget) -> None:
@@ -43,6 +44,7 @@ class Page2(QWidget):
         self.next_page = next_page
         self.exit_application = exit_application
         self.pipeline: Optional[rs.pipeline] = None
+        self.data_thread: Optional[DataAcquisitionThread] = None
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -92,9 +94,9 @@ class Page2(QWidget):
     def start_steps(self) -> None:
         self.timer.stop()
 
-        self.video_timer = QTimer(self)
-        self.video_timer.timeout.connect(self.update_camera_preview)
-        self.video_timer.start(30)
+        self.data_thread = DataAcquisitionThread(self.pipeline)
+        self.data_thread.data_updated.connect(self.process_frame)
+        self.data_thread.start()
 
         self.next_button.setVisible(True)
 
@@ -103,13 +105,8 @@ class Page2(QWidget):
         if hasattr(self, 'camera_pixmap_item') and self.camera_pixmap_item:
             self.canvas.setSceneRect(0, 0, self.width(), self.height())
             self.bracket_overlay.resize(self.size())
-            self.update_camera_preview()
 
-    def update_camera_preview(self) -> None:
-        if not self.pipeline:
-            return
-
-        frames = self.pipeline.wait_for_frames()
+    def process_frame(self, frames: rs.frame) -> None:
         color_frame = frames.get_color_frame()
         if not color_frame:
             return
@@ -127,3 +124,18 @@ class Page2(QWidget):
 
         self.camera_pixmap_item.setOffset(-self.camera_pixmap_item.pixmap().width() / 2, -self.camera_pixmap_item.pixmap().height() / 2)
         self.camera_pixmap_item.setPos(self.canvas.viewport().width() / 2, self.canvas.viewport().height() / 2)
+
+    def stop_data_thread(self) -> None:
+        if self.data_thread and self.data_thread.isRunning():
+            self.data_thread.stop()
+            self.data_thread.wait()
+
+    def closeEvent(self, event: QEvent) -> None:
+        self.stop_data_thread()
+        super().closeEvent(event)
+
+    def exit_application(self) -> None:
+        self.stop_data_thread()
+        if hasattr(self, 'pipeline') and self.pipeline:
+            self.pipeline.stop()
+        sys.exit()

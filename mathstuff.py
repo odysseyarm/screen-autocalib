@@ -35,7 +35,7 @@ def plane_from_points(points: npt.NDArray[np.float32]) -> Tuple[np.ndarray[Liter
     # Extract inlier points
     inlier_mask = ransac.inlier_mask_ # type: ignore
     inliers = points[inlier_mask]
-    
+
     # Use skspatial to find the best fitting plane for the inliers
     plane = Plane.best_fit(inliers)
 
@@ -45,7 +45,7 @@ def plane_from_points(points: npt.NDArray[np.float32]) -> Tuple[np.ndarray[Liter
 
     return centroid, normal
 
-def compute_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]) -> np.ndarray[Literal[4, 4], np.dtype[np.float64]]:
+def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]) -> np.ndarray[Literal[4, 4], np.dtype[np.float64]]:
     normal = plane[1]
     d = plane[0]
     z_axis = normal / np.linalg.norm(normal)
@@ -63,10 +63,31 @@ def compute_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.dtype[n
 
     return transformation_matrix
 
-def apply_transformation(points: np.ndarray[Any, np.dtype[np.float32]], transformation_matrix: np.ndarray[Literal[4, 4], np.dtype[np.float64]]) -> np.ndarray[Any, np.dtype[np.float32]]:
-    points = np.hstack([points, np.ones((points.shape[0], 1), dtype=np.float32)])
-    points = np.dot(transformation_matrix, points.T).T
-    return points[:, :3]
+def apply_transformation(array, transformation_matrix):
+    """
+    Apply a transformation to a NumPy array.
+
+    Parameters:
+    array (np.ndarray): The input array to be transformed. Each row represents a point/vector.
+    transformation_matrix (np.ndarray): The transformation matrix to apply.
+
+    Returns:
+    np.ndarray: The transformed array.
+    """
+    if array.shape[1] + 1 != transformation_matrix.shape[0]:
+        raise ValueError("The transformation matrix and array dimensions do not match.")
+    
+    # Add a column of ones to the input array for homogeneous coordinates
+    ones = np.ones((array.shape[0], 1))
+    homogeneous_array = np.hstack((array, ones))
+    
+    # Apply the transformation
+    transformed_homogeneous_array = homogeneous_array.dot(transformation_matrix.T)
+    
+    # Convert back from homogeneous coordinates
+    transformed_array = transformed_homogeneous_array[:, :-1] / transformed_homogeneous_array[:, -1][:, np.newaxis]
+    
+    return transformed_array
 
 def evaluate_plane(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], point: np.ndarray[Literal[3], np.dtype[np.float32]]) -> np.float32:
     centroid, normal = plane

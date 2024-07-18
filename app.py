@@ -54,9 +54,17 @@ class MainWindow(QMainWindow):
 
                 config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
                 config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+                config.enable_stream(rs.stream.accel)
+                config.enable_stream(rs.stream.gyro)
                 print("Streaming from RealSense camera.")
 
             self.pipeline_profile = self.pipeline.start(config)
+
+            # Set fixed exposure and disable auto exposure for depth stream
+            depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
+            if depth_sensor:
+                depth_sensor.set_option(rs.option.exposure, 1500)
+                depth_sensor.set_option(rs.option.enable_auto_exposure, 0)
 
             # Create and configure a temporal filter
             self.temporal_filter = rs.temporal_filter()
@@ -67,6 +75,9 @@ class MainWindow(QMainWindow):
             self.page3.temporal_filter = self.temporal_filter
             self.page3.align = self.align
 
+            # Pass the pipeline to Page2
+            self.page2.pipeline = self.pipeline
+
             self.goto_page2()
 
         except Exception as e:
@@ -74,9 +85,11 @@ class MainWindow(QMainWindow):
             self.exit_application()
 
     def goto_page3(self) -> None:
+        self.page3.start_data_acquisition()
         self.stacked_widget.setCurrentWidget(self.page3)
 
     def goto_page2(self) -> None:
+        self.page2.start_steps()
         self.stacked_widget.setCurrentWidget(self.page2)
 
     def exit_application(self) -> None:

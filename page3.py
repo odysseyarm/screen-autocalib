@@ -11,6 +11,8 @@ from platformdirs import *
 from pathlib import Path
 import io
 import json
+from ahrs.filters import Madgwick
+from data_acquisition import DataAcquisitionThread
 
 def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]:
     points = dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]()
@@ -43,6 +45,12 @@ class Page3(QWidget):
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
         self.screen_id = screen_id
+        self.gravity_vector: Optional[np.ndarray] = None
+        self.latest_color_frame: Optional[rs.frame] = None
+        self.latest_depth_frame: Optional[rs.frame] = None
+        self.madgwick = Madgwick()  # Initialize Madgwick filter
+        self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
+        self.data_thread: Optional[DataAcquisitionThread] = None
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -102,7 +110,7 @@ class Page3(QWidget):
 
     def on_go_clicked(self) -> None:
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
-        QTimer.singleShot(3000, self.detect_charuco_corners) # type: ignore
+        QTimer.singleShot(3000, self.detect_charuco_corners)  # type: ignore
 
     def create_charuco_board(self) -> None:
         # Create the ChArUco board
@@ -123,27 +131,15 @@ class Page3(QWidget):
         self.label.setPixmap(pixmap)
 
     def detect_charuco_corners(self) -> None:
-        if not self.pipeline or not self.temporal_filter or not self.align:
-            print("Error: Pipeline, temporal filter, or align processing block is not initialized.")
+        if not self.latest_color_frame or not self.latest_depth_frame:
+            print("Error: No frames available for ChArUco board detection.")
             return
 
-        # Allow some frames to stabilize
-        for _ in range(30):
-            self.pipeline.wait_for_frames()
-
-        frames = self.pipeline.wait_for_frames()
-        aligned_frames = self.align.process(frames)
-        color_frame = aligned_frames.get_color_frame()
-        depth_frame = aligned_frames.get_depth_frame()
-
-        if not color_frame or not depth_frame:
-            print("Error: Could not capture frames.")
-            return
-
-        filtered_depth_frame = self.temporal_filter.process(depth_frame).as_depth_frame()
+        color_frame = self.latest_color_frame
+        depth_frame = self.latest_depth_frame
 
         color_image = np.asanyarray(color_frame.get_data())
-        depth_image = np.asanyarray(filtered_depth_frame.get_data())
+        depth_image = np.asanyarray(depth_frame.get_data())
 
         # Detect ChArUco board corners
         aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
@@ -157,14 +153,25 @@ class Page3(QWidget):
         gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
 
         charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
-        charuco_ids = cast(Optional[cv2.typing.MatLike], charuco_ids) # OpenCV typings are missing "| None" in several places
+        charuco_ids = cast(Optional[cv2.typing.MatLike], charuco_ids)  # OpenCV typings are missing "| None" in several places
 
         if charuco_ids is not None:
-            # cv2.aruco.drawDetectedMarkers(color_image, marker_corners, marker_ids)
             cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners, charuco_ids, cornerColor=(0, 0, 255))
 
+            # Use the gravity vector from the Madgwick filter
+            self.gravity_vector = self.get_gravity_vector()
+
             # Extract 3D points from the depth frame
-            points_3d = extract_3d_points(charuco_corners, filtered_depth_frame)
+            points_3d = extract_3d_points(charuco_corners, depth_frame)
+
+            # Calculate the transformation matrix and its inverse to align with gravity
+            align_transform_mtx = self.calculate_gravity_alignment_matrix(self.gravity_vector)
+            align_transform_inv_mtx = np.linalg.inv(align_transform_mtx)
+
+            # Align the 3D points with gravity
+            points_3d_aligned = [align_transform_mtx @ point for point in points_3d]
+
+            intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
 
             # Define the expected positions of the ChArUco board corners
             charuco_board_2d_points = define_charuco_board_2d_points((11, 7), 1)
@@ -186,7 +193,7 @@ class Page3(QWidget):
                 scale_y = 0
 
             # Normalize the expected positions to the unit square
-            charuco_board_2d_points = {id_: [(1 + point[0] + scale_x/2) / (11 + scale_x), (1 + point[1] + scale_y/2) / (7 + scale_y)] for id_, point in charuco_board_2d_points.items()}
+            charuco_board_2d_points = {id_: [(1 + point[0] + scale_x / 2) / (11 + scale_x), (1 + point[1] + scale_y / 2) / (7 + scale_y)] for id_, point in charuco_board_2d_points.items()}
 
             # Filter expected points and detected points based on IDs
             expected_points = list[np.ndarray[Literal[2], np.dtype[np.float32]]]()
@@ -199,42 +206,39 @@ class Page3(QWidget):
             expected_points = np.array(expected_points, dtype=np.float32)
             detected_points = np.array(detected_points, dtype=np.float32)
 
-            points_3d = np.array(points_3d)
-
             # Fit a plane using the custom plane fitting function
-            plane = plane_from_points(points_3d)
+            plane = plane_from_points(detected_points)
+            print(f"Plane origin: {plane[0]}, Plane normal: {plane[1]}")
 
-            # Deproject the detected points to the 3D plane
+            # Deproject the detected points to the 3D plane using transformed intrinsics
             deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
-            intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
             for detected_point in charuco_corners:
                 deprojected_point = approximate_intersection(plane, intrin, detected_point[0][0], detected_point[0][1], 0, 1000)
                 deprojected_points.append(deprojected_point)
 
-            deprojected_points = np.array(deprojected_points)
+            deprojected_points_aligned = [align_transform_mtx @ point for point in deprojected_points]
+            deprojected_points_aligned = np.array(deprojected_points_aligned, dtype=np.float32)
+
+            # rotate plane to align with gravity
+            plane_aligned = (align_transform_mtx @ plane[0], align_transform_mtx @ plane[1])
+            print(f"Plane origin aligned: {plane_aligned[0]}, Plane normal aligned: {plane_aligned[1]}")
 
             # Ensure deprojected_points are distinct
-            if len(np.unique(deprojected_points, axis=0)) <= 1:
+            if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
                 print("Error: Deprojected points are not distinct.")
                 return
 
-            # print("before transformation")
-            # print(deprojected_points)
-
             # Find transformation matrix that aligns the plane with the XY plane
-            transformation_matrix = compute_transformation_matrix(plane)
+            xy_transformation_matrix_aligned = compute_xy_transformation_matrix(plane_aligned)
 
             # Apply the transformation to the detected points
-            transformed_points = apply_transformation(deprojected_points, transformation_matrix)
-
-            # print("after transformation")
-            # print(transformed_points)
+            transformed_points = apply_transformation(deprojected_points_aligned, xy_transformation_matrix_aligned)
 
             # Map the unit square corners to the plane's coordinate system using homography
-            h, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
-            h = cast(Optional[cv2.typing.MatLike], h) # OpenCV typings are missing "| None" in several places
+            h_aligned, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
+            h_aligned = cast(Optional[cv2.typing.MatLike], h_aligned)  # OpenCV typings are missing "| None" in several places
 
-            if h is None:
+            if h_aligned is None:
                 print("Error: Homography could not be computed.")
                 return
 
@@ -247,13 +251,16 @@ class Page3(QWidget):
             ], dtype=np.float32)
 
             # Map the unit square corners to the plane's coordinate system using homography
-            transformed_unit_square_2d = cv2.perspectiveTransform(normalized_corners.reshape(-1,1,2), h)
+            transformed_unit_square_2d_aligned = cv2.perspectiveTransform(normalized_corners.reshape(-1, 1, 2), h_aligned)
 
             # Transform the resulting 2D points back to the 3D plane
-            transformed_unit_square_3d = transformed_unit_square_2d.reshape(-1, 2)
-            transformed_unit_square_3d = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_unit_square_3d)
-            transformed_unit_square_3d = np.hstack([transformed_unit_square_3d, np.zeros((4, 1), dtype=np.float32)])
-            best_quad = apply_transformation(transformed_unit_square_3d, np.linalg.inv(transformation_matrix))
+            transformed_unit_square_3d_aligned = transformed_unit_square_2d_aligned.reshape(-1, 2)
+            transformed_unit_square_3d_aligned = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_unit_square_3d_aligned)
+            transformed_unit_square_3d_aligned = np.hstack([transformed_unit_square_3d_aligned, np.zeros((4, 1), dtype=np.float32)])
+            best_quad_aligned = apply_transformation(transformed_unit_square_3d_aligned, np.linalg.inv(xy_transformation_matrix_aligned))
+
+            # Unalign the best quad points for 2D projection
+            best_quad = [align_transform_inv_mtx @ point for point in best_quad_aligned]
 
             # Project best_quad edges to the image
             best_quad_2d = []
@@ -265,32 +272,30 @@ class Page3(QWidget):
 
             # Find the expected ir marker locations
             normalized_marker_pattern = marker_pattern()
-            transformed_marker_pattern_3d = cv2.perspectiveTransform(normalized_marker_pattern.reshape(-1,1,2), h).reshape(-1, 2)
-            transformed_marker_pattern_3d = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_marker_pattern_3d)
-            transformed_marker_pattern_3d = np.hstack([transformed_marker_pattern_3d, np.zeros((6, 1), dtype=np.float32)])
-            expected_marker_pattern = apply_transformation(transformed_marker_pattern_3d, np.linalg.inv(transformation_matrix))
+            transformed_marker_pattern_3d_aligned = cv2.perspectiveTransform(normalized_marker_pattern.reshape(-1, 1, 2), h_aligned).reshape(-1, 2)
+            transformed_marker_pattern_3d_aligned = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_marker_pattern_3d_aligned)
+            transformed_marker_pattern_3d_aligned = np.hstack([transformed_marker_pattern_3d_aligned, np.zeros((6, 1), dtype=np.float32)])
+            expected_marker_pattern_aligned = apply_transformation(transformed_marker_pattern_3d_aligned, np.linalg.inv(xy_transformation_matrix_aligned))
 
-            # Project expected_marker_pattern to the image
-            expected_marker_pattern_2d = []
-            for point in expected_marker_pattern:
-                point_2d = rs.rs2_project_point_to_pixel(intrin, point)
-                expected_marker_pattern_2d.append(point_2d)
-
-            expected_marker_pattern_2d = np.array(expected_marker_pattern_2d, dtype=np.int32)
+            # Unalign the expected marker pattern points for 2D projection
+            expected_marker_pattern = [align_transform_inv_mtx @ point for point in expected_marker_pattern_aligned]
 
             # TODO - Detect the ir markers based on the expected locations
             detected_marker_pattern = expected_marker_pattern
 
-            # set members for saving
-            self.plane = plane
-            self.homography = h
-            self.object_points = expected_marker_pattern
+            # Project detected_marker_pattern to the image
+            detected_marker_pattern_2d = []
+            for point in detected_marker_pattern:
+                point_2d = rs.rs2_project_point_to_pixel(intrin, point)
+                detected_marker_pattern_2d.append(point_2d)
+
+            detected_marker_pattern_2d = np.array(detected_marker_pattern_2d, dtype=np.int32)
 
             # Draw the best quad on the image
             cv2.polylines(color_image, [best_quad_2d], isClosed=True, color=(0, 255, 0), thickness=2)
 
             # Draw the expected marker pattern on the image as purple outline circles
-            for point in expected_marker_pattern_2d:
+            for point in detected_marker_pattern_2d:
                 cv2.circle(color_image, tuple(point), 5, (255, 0, 255), -1)
 
             # Show RGB image with detected parts
@@ -305,20 +310,20 @@ class Page3(QWidget):
             fig = plt.figure()
             ax = fig.add_subplot(111, projection='3d')
 
-            for point in best_quad:
+            for point in best_quad_aligned:
                 ax.scatter(point[0], point[2], -point[1], c='r', marker='o')  # Swap Y and Z, reverse Y
 
             # Draw best quad to the plot
             for i in range(4):
-                ax.plot([best_quad[i][0], best_quad[(i + 1) % 4][0]],
-                        [best_quad[i][2], best_quad[(i + 1) % 4][2]],
-                        [-best_quad[i][1], -best_quad[(i + 1) % 4][1]], 'g')
+                ax.plot([best_quad_aligned[i][0], best_quad_aligned[(i + 1) % 4][0]],
+                        [best_quad_aligned[i][2], best_quad_aligned[(i + 1) % 4][2]],
+                        [-best_quad_aligned[i][1], -best_quad_aligned[(i + 1) % 4][1]], 'g')
 
             # Now also draw the detected chessboard corner 3d points in the plot
-            for point in points_3d:
+            for point in points_3d_aligned:
                 ax.scatter(point[0], point[2], -point[1], c='b', marker='x', s=0.5)
-            
-            for point in expected_marker_pattern:
+
+            for point in expected_marker_pattern_aligned:
                 ax.scatter(point[0], point[2], -point[1], c='violet', marker='o', s=10)
 
             ax.set_xlabel('X')
@@ -335,11 +340,16 @@ class Page3(QWidget):
 
             plt.close(fig)
 
+            # set members for saving
+            self.plane = plane_aligned
+            self.homography = h_aligned
+            self.object_points = expected_marker_pattern_aligned
+
             # Enable the "Done" button after showing the results
             self.next_button.setEnabled(True)
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
-    
+
     def save_and_exit(self) -> None:
         _user_data_dir = Path(user_data_dir("odyssey", "odysseyarm", roaming=True))
         screens_dir = _user_data_dir.joinpath("screens")
@@ -357,3 +367,76 @@ class Page3(QWidget):
                 "object_points": self.object_points.tolist(),
             }))
         self.exit_application()
+
+    def get_gravity_vector(self) -> np.ndarray:
+        quaternion = self.Q
+        gravity_vector = np.array([0, 0, -1])
+        rotation_matrix = self.quaternion_to_rotation_matrix(quaternion)
+        gravity_vector = rotation_matrix @ gravity_vector
+        return gravity_vector / np.linalg.norm(gravity_vector)
+
+    def quaternion_to_rotation_matrix(self, q: np.ndarray) -> np.ndarray:
+        q0, q1, q2, q3 = q
+        return np.array([
+            [1 - 2 * (q2**2 + q3**2), 2 * (q1*q2 - q0*q3), 2 * (q1*q3 + q0*q2)],
+            [2 * (q1*q2 + q0*q3), 1 - 2 * (q1**2 + q3**2), 2 * (q2*q3 - q0*q1)],
+            [2 * (q1*q3 - q0*q2), 2 * (q2*q3 + q0*q1), 1 - 2 * (q1**2 + q2**2)]
+        ])
+
+    def calculate_gravity_alignment_matrix(self, gravity_vector: np.ndarray) -> np.ndarray:
+        # Create a rotation matrix to align Y-axis with the gravity vector
+        y_axis = np.array([0, 1, 0])
+        rotation_axis = np.cross(y_axis, gravity_vector)
+        rotation_axis /= np.linalg.norm(rotation_axis)
+        cos_angle = np.dot(y_axis, gravity_vector)
+        angle = np.arccos(cos_angle)
+        sin_angle = np.sin(angle)
+
+        # Compute the rotation matrix using Rodrigues' rotation formula
+        K = np.array([
+            [0, -rotation_axis[2], rotation_axis[1]],
+            [rotation_axis[2], 0, -rotation_axis[0]],
+            [-rotation_axis[1], rotation_axis[0], 0]
+        ], dtype=np.float32)
+        rotation_matrix = np.eye(3) + sin_angle * K + (1 - cos_angle) * (K @ K)
+
+        return rotation_matrix
+
+    def process_frame(self, frames: rs.frame) -> None:
+        color_frame = frames.get_color_frame()
+        depth_frame = frames.get_depth_frame()
+        accel_frame = frames.first_or_default(rs.stream.accel)
+        gyro_frame = frames.first_or_default(rs.stream.gyro)
+
+        if not color_frame or not depth_frame or not accel_frame or not gyro_frame:
+            return
+
+        self.latest_color_frame = color_frame
+        self.latest_depth_frame = depth_frame
+
+        accel_data = accel_frame.as_motion_frame().get_motion_data()
+        gyro_data = gyro_frame.as_motion_frame().get_motion_data()
+
+        # Update Madgwick filter
+        self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.y, gyro_data.z], acc=[accel_data.x, accel_data.y, accel_data.z])
+
+    def start_data_acquisition(self) -> None:
+        if self.pipeline:
+            self.data_thread = DataAcquisitionThread(self.pipeline)
+            self.data_thread.data_updated.connect(self.process_frame)
+            self.data_thread.start()
+
+    def stop_data_thread(self) -> None:
+        if self.data_thread and self.data_thread.isRunning():
+            self.data_thread.stop()
+            self.data_thread.wait()
+
+    def closeEvent(self, event: Any) -> None:
+        self.stop_data_thread()
+        super().closeEvent(event)
+
+    def exit_application(self) -> None:
+        self.stop_data_thread()
+        if hasattr(self, 'pipeline') and self.pipeline:
+            self.pipeline.stop()
+        sys.exit()
