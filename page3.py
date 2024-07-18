@@ -327,6 +327,10 @@ class Page3(QWidget):
             for point in expected_marker_pattern_aligned:
                 ax.scatter(point[0], point[1], point[2], c='violet', marker='o', s=10)
 
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            ax.set_zlabel('Z')
+
             ax.invert_zaxis()
 
             fig.canvas.draw()
