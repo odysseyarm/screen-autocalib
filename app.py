@@ -58,13 +58,14 @@ class MainWindow(QMainWindow):
                 config.enable_stream(rs.stream.gyro)
                 print("Streaming from RealSense camera.")
 
-            self.pipeline_profile = self.pipeline.start(config)
+                # Set fixed exposure and disable auto exposure for depth stream
+                depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
+                if depth_sensor:
+                    depth_sensor.set_option(rs.option.exposure, 1500)
+                    depth_sensor.set_option(rs.option.enable_auto_exposure, 0)
 
-            # Set fixed exposure and disable auto exposure for depth stream
-            depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
-            if depth_sensor:
-                depth_sensor.set_option(rs.option.exposure, 1500)
-                depth_sensor.set_option(rs.option.enable_auto_exposure, 0)
+
+            self.pipeline_profile = self.pipeline.start(config)
 
             # Create and configure a temporal filter
             self.temporal_filter = rs.temporal_filter()
