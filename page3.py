@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.typing as npt
 import quaternion
 import cv2
 import pyrealsense2 as rs
@@ -7,13 +8,13 @@ import matplotlib.pyplot as plt
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
-from mathstuff import *
-from platformdirs import *
+from platformdirs import user_data_dir
 from pathlib import Path
 import io
 import json
 from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
+from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern
 
 def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]:
     points = dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]()
@@ -49,7 +50,7 @@ class Page3(QWidget):
         self.gravity_vector: Optional[np.ndarray] = None
         self.latest_color_frame: Optional[rs.frame] = None
         self.latest_depth_frame: Optional[rs.frame] = None
-        self.madgwick = Madgwick()  # Initialize Madgwick filter
+        self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
         self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
         self.data_thread: Optional[DataAcquisitionThread] = None
         self.init_ui()
@@ -111,7 +112,7 @@ class Page3(QWidget):
 
     def on_go_clicked(self) -> None:
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
-        QTimer.singleShot(3000, self.detect_charuco_corners)  # type: ignore
+        QTimer.singleShot(1000, self.detect_charuco_corners)  # type: ignore
 
     def create_charuco_board(self) -> None:
         # Create the ChArUco board
@@ -209,7 +210,6 @@ class Page3(QWidget):
 
             # Fit a plane using the custom plane fitting function
             plane = plane_from_points(detected_points)
-            print(f"Plane origin: {plane[0]}, Plane normal: {plane[1]}")
 
             # Deproject the detected points to the 3D plane using transformed intrinsics
             deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
@@ -222,7 +222,6 @@ class Page3(QWidget):
 
             # rotate plane to align with gravity
             plane_aligned = (align_transform_mtx @ plane[0], align_transform_mtx @ plane[1])
-            print(f"Plane origin aligned: {plane_aligned[0]}, Plane normal aligned: {plane_aligned[1]}")
 
             # Ensure deprojected_points are distinct
             if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
@@ -283,6 +282,7 @@ class Page3(QWidget):
 
             # TODO - Detect the ir markers based on the expected locations
             detected_marker_pattern = expected_marker_pattern
+            detected_marker_pattern_aligned = expected_marker_pattern_aligned
 
             # Project detected_marker_pattern to the image
             detected_marker_pattern_2d = []
@@ -342,7 +342,7 @@ class Page3(QWidget):
             # set members for saving
             self.plane = plane_aligned
             self.homography = h_aligned
-            self.object_points = expected_marker_pattern_aligned
+            self.object_points = detected_marker_pattern_aligned
 
             # Enable the "Done" button after showing the results
             self.next_button.setEnabled(True)
@@ -351,9 +351,9 @@ class Page3(QWidget):
 
     def get_gravity_vector(self) -> np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]:
         q: np.quaternion = np.quaternion(*self.Q)
-        gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]] = np.array([0, 0, 1], dtype=np.float64)
-        gravity_vector = quaternion.as_rotation_matrix(q) @ gravity_vector
-        return gravity_vector / np.linalg.norm(gravity_vector)
+        gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float32]] = quaternion.as_rotation_matrix(q) @ np.array([0, 0, 1], dtype=np.float32)
+        gravity_vector /= np.linalg.norm(gravity_vector)
+        return gravity_vector
 
     def save_and_exit(self) -> None:
         _user_data_dir = Path(user_data_dir("odyssey", "odysseyarm", roaming=True))
@@ -389,7 +389,9 @@ class Page3(QWidget):
         gyro_data = gyro_frame.as_motion_frame().get_motion_data()
 
         # Update Madgwick filter
-        self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.y, gyro_data.z], acc=[accel_data.x, accel_data.y, accel_data.z])
+        self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.y, gyro_data.z], acc=[accel_data.x, accel_data.z, -accel_data.y])
+
+        self.gravity_vector = self.get_gravity_vector()
 
     def start_data_acquisition(self) -> None:
         if self.pipeline:

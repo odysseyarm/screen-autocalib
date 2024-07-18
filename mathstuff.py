@@ -47,18 +47,24 @@ def plane_from_points(points: npt.NDArray[np.float32]) -> Tuple[np.ndarray[Liter
     return centroid, normal
 
 def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]) -> np.ndarray[Literal[4, 4], np.dtype[np.float64]]:
-    normal = plane[1]
-    d = plane[0]
-    z_axis = normal / np.linalg.norm(normal)
-    x_axis = np.cross(np.array([0, 1, 0]), z_axis)
+    centroid = plane[0]
+    normal = plane[1] / np.linalg.norm(plane[1])
+
+    # Create the rotation matrix to align the plane normal with the Z-axis
+    z_axis = normal
+    x_axis = np.cross(np.array([0, 1, 0], dtype=np.float64), z_axis)
     if np.linalg.norm(x_axis) == 0:
-        x_axis = np.cross(np.array([1, 0, 0]), z_axis)
-    x_axis = x_axis / np.linalg.norm(x_axis)
+        x_axis = np.cross(np.array([1, 0, 0], dtype=np.float64), z_axis)
+    x_axis /= np.linalg.norm(x_axis)
     y_axis = np.cross(z_axis, x_axis)
 
     rotation_matrix = np.vstack([x_axis, y_axis, z_axis])
-    translation = -np.dot(rotation_matrix, normal * d / np.dot(normal, normal))
-    transformation_matrix = np.eye(4)
+
+    # Translate the plane's centroid to the origin
+    translation = -rotation_matrix @ centroid
+
+    # Create the transformation matrix
+    transformation_matrix = np.eye(4, dtype=np.float64)
     transformation_matrix[:3, :3] = rotation_matrix
     transformation_matrix[:3, 3] = translation
 
