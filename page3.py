@@ -312,26 +312,26 @@ class Page3(QWidget):
             ax = fig.add_subplot(111, projection='3d')
 
             for point in best_quad_aligned:
-                ax.scatter(point[0], point[1], point[2], c='r', marker='o')
+                ax.scatter(point[0], point[2], point[1], c='r', marker='o')  # Swap Y and Z
 
             # Draw best quad to the plot
             for i in range(4):
                 ax.plot([best_quad_aligned[i][0], best_quad_aligned[(i + 1) % 4][0]],
-                        [best_quad_aligned[i][1], best_quad_aligned[(i + 1) % 4][1]],
-                        [best_quad_aligned[i][2], best_quad_aligned[(i + 1) % 4][2]], 'g')
+                        [best_quad_aligned[i][2], best_quad_aligned[(i + 1) % 4][2]],
+                        [best_quad_aligned[i][1], best_quad_aligned[(i + 1) % 4][1]], 'g')  # Swap Y and Z
 
             # Now also draw the detected chessboard corner 3d points in the plot
             for point in points_3d_aligned:
-                ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
+                ax.scatter(point[0], point[2], point[1], c='b', marker='x', s=0.5)  # Swap Y and Z
 
             for point in expected_marker_pattern_aligned:
-                ax.scatter(point[0], point[1], point[2], c='violet', marker='o', s=10)
+                ax.scatter(point[0], point[2], point[1], c='violet', marker='o', s=10)  # Swap Y and Z
 
             ax.set_xlabel('X')
-            ax.set_ylabel('Y')
-            ax.set_zlabel('Z')
+            ax.set_ylabel('Z')
+            ax.set_zlabel('Y')
 
-            ax.invert_zaxis()
+            ax.invert_zaxis() # Actually inverting y axis
 
             fig.canvas.draw()
             width, height = fig.canvas.get_width_height()
@@ -355,7 +355,7 @@ class Page3(QWidget):
 
     def get_gravity_vector(self) -> np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]:
         q: np.quaternion = np.quaternion(*self.Q)
-        gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float32]] = quaternion.as_rotation_matrix(q) @ np.array([0, 0, 1], dtype=np.float32)
+        gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float32]] = quaternion.as_rotation_matrix(q) @ np.array([0, 1, 0], dtype=np.float32)
         gravity_vector /= np.linalg.norm(gravity_vector)
         return gravity_vector
 
