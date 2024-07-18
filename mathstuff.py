@@ -134,7 +134,7 @@ def calculate_gravity_alignment_matrix(gravity_vector: np.ndarray[Tuple[Literal[
     Returns:
     np.ndarray[Tuple[Literal[3], Literal[3]], np.dtype[np.float64]]: Rotation matrix
     """
-    y_axis = np.array([0, 1, 0], dtype=np.float64)
+    y_axis = np.array([0, -1, 0], dtype=np.float64)
     gravity_vector = gravity_vector / np.linalg.norm(gravity_vector)
     rotation_axis = np.cross(y_axis, gravity_vector)
     rotation_axis /= np.linalg.norm(rotation_axis)
