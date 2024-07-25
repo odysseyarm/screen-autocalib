@@ -46,27 +46,33 @@ def plane_from_points(points: npt.NDArray[np.float32]) -> Tuple[np.ndarray[Liter
 
     return centroid, normal
 
-def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]) -> np.ndarray[Literal[4, 4], np.dtype[np.float64]]:
-    centroid = plane[0]
-    normal = plane[1] / np.linalg.norm(plane[1])
+def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.float32], np.ndarray[Literal[3], np.float32]]) -> np.ndarray[Literal[4, 4], np.float64]:
+    point, normal = plane
 
-    # Create the rotation matrix to align the plane normal with the Z-axis
-    z_axis = normal
-    x_axis = np.cross(np.array([0, 1, 0], dtype=np.float64), z_axis)
-    if np.linalg.norm(x_axis) == 0:
-        x_axis = np.cross(np.array([1, 0, 0], dtype=np.float64), z_axis)
-    x_axis /= np.linalg.norm(x_axis)
-    y_axis = np.cross(z_axis, x_axis)
+    # Normalize the normal vector
+    normal = normal / np.linalg.norm(normal)
 
-    rotation_matrix = np.vstack([x_axis, y_axis, z_axis])
+    # Find two vectors orthogonal to the normal vector
+    if np.abs(normal[0]) > np.abs(normal[2]):
+        v = np.array([-normal[1], normal[0], 0], dtype=np.float64)
+    else:
+        v = np.array([0, -normal[2], normal[1]], dtype=np.float64)
+    v = v / np.linalg.norm(v)
 
-    # Translate the plane's centroid to the origin
-    translation = -rotation_matrix @ centroid
+    # Create the orthonormal basis
+    u = np.cross(normal, v)
+    u = u / np.linalg.norm(u)
 
-    # Create the transformation matrix
-    transformation_matrix = np.eye(4, dtype=np.float64)
-    transformation_matrix[:3, :3] = rotation_matrix
-    transformation_matrix[:3, 3] = translation
+    # Construct the rotation matrix (column-major)
+    rotation_matrix = np.eye(4, dtype=np.float64)
+    rotation_matrix[:3, :3] = np.array([u, v, normal], dtype=np.float64)
+
+    # Construct the translation matrix (column-major)
+    translation_matrix = np.eye(4, dtype=np.float64)
+    translation_matrix[:3, 3] = -point
+
+    # Combine translation and rotation to form the transformation matrix
+    transformation_matrix = np.dot(translation_matrix, rotation_matrix)
 
     return transformation_matrix
 
@@ -100,7 +106,7 @@ def evaluate_plane(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np
     centroid, normal = plane
     return np.dot(normal, point - centroid)
 
-def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-3):
+def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-14):
     def deproject(x, y, z):
         return np.array(rs.rs2_deproject_pixel_to_point(intrin, [x, y], z))
     
@@ -154,13 +160,22 @@ def calculate_gravity_alignment_matrix(gravity_vector: np.ndarray[Tuple[Literal[
 
 def marker_pattern():
     # Define the points using normalized coordinates with (0,0) as the top-left corner
+    # points = [
+    #     np.array([0.28, 0.35]),
+    #     np.array([0.25, 0.77]),
+    #     np.array([0.67, 0.73]),
+    #     np.array([0.51, 0.4]),
+    #     np.array([0.7, 0.3]),
+    #     np.array([0.49, 0.71]),
+    # ]
+
     points = [
-        np.array([0.2, 0.15]),
-        np.array([0.25, 0.87]),
-        np.array([0.75, 0.83]),
-        np.array([0.46, 0.2]),
-        np.array([0.7, 0.1]),
-        np.array([0.5, 0.8]),
+        np.array([-0.31944444444 + 0.5, -0.20238095238 + 0.5]),
+        np.array([-0.34722222222 + 0.5, 0.32142857142 + 0.5]),
+        np.array([0.27083333333 + 0.5, 0.28571428571 + 0.5]),
+        np.array([0.01041666666 + 0.5, -0.15476190476 + 0.5]),
+        np.array([0.29861111111 + 0.5, .25 - .5 + 0.5]),
+        np.array([-0.01041666666 + 0.5, 0.2619047619 + 0.5]),
     ]
 
     return np.array(points)

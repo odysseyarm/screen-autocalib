@@ -50,6 +50,7 @@ class Page3(QWidget):
         self.gravity_vector: Optional[np.ndarray] = None
         self.latest_color_frame: Optional[rs.frame] = None
         self.latest_depth_frame: Optional[rs.frame] = None
+        self.latest_ir_frame: Optional[rs.frame] = None
         self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
         self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
         self.data_thread: Optional[DataAcquisitionThread] = None
@@ -133,15 +134,16 @@ class Page3(QWidget):
         self.label.setPixmap(pixmap)
 
     def detect_charuco_corners(self) -> None:
-        if not self.latest_color_frame or not self.latest_depth_frame:
+        if not self.latest_color_frame or not self.latest_depth_frame or not self.latest_ir_frame:
             print("Error: No frames available for ChArUco board detection.")
             return
 
         color_frame = self.latest_color_frame
         depth_frame = self.latest_depth_frame
+        ir_frame = self.latest_ir_frame
 
         color_image = np.asanyarray(color_frame.get_data())
-        depth_image = np.asanyarray(depth_frame.get_data())
+        ir_image = np.asanyarray(ir_frame.get_data())
 
         # Detect ChArUco board corners
         aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
@@ -231,8 +233,14 @@ class Page3(QWidget):
             # Find transformation matrix that aligns the plane with the XY plane
             xy_transformation_matrix_aligned = compute_xy_transformation_matrix(plane_aligned)
 
+            print("Deprojected points (aligned): ", deprojected_points_aligned)
+
+            print("Transformation matrix (aligned): ", xy_transformation_matrix_aligned)
+
             # Apply the transformation to the detected points
             transformed_points = apply_transformation(deprojected_points_aligned, xy_transformation_matrix_aligned)
+
+            print("Transformed points: ", transformed_points)
 
             # Map the unit square corners to the plane's coordinate system using homography
             h_aligned, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
@@ -249,6 +257,8 @@ class Page3(QWidget):
                 [1, 1],
                 [0, 1]
             ], dtype=np.float32)
+
+            print("Homography (aligned): ", h_aligned)
 
             # Map the unit square corners to the plane's coordinate system using homography
             transformed_unit_square_2d_aligned = cv2.perspectiveTransform(normalized_corners.reshape(-1, 1, 2), h_aligned)
@@ -270,6 +280,26 @@ class Page3(QWidget):
 
             best_quad_2d = np.array(best_quad_2d, dtype=np.int32)
 
+            # Detect IR blobs in the depth image
+            ir_image = ir_image.astype(np.uint8)
+
+            # Apply a threshold to binarize the image
+            _, binary_ir_image = cv2.threshold(ir_image, 240, 255, cv2.THRESH_BINARY)
+
+            cv2.imshow("Binary IR Image", binary_ir_image)
+
+            # Find contours in the binary image
+            contours, _ = cv2.findContours(binary_ir_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            detected_markers_2d = []
+            for cnt in contours:
+                if cv2.contourArea(cnt) > 20:  # Filter small contours
+                    M = cv2.moments(cnt)
+                    if M['m00'] != 0:
+                        cx = int(M['m10'] / M['m00'])
+                        cy = int(M['m01'] / M['m00'])
+                        detected_markers_2d.append([cx, cy])
+
             # Find the expected ir marker locations
             normalized_marker_pattern = marker_pattern()
             transformed_marker_pattern_3d_aligned = cv2.perspectiveTransform(normalized_marker_pattern.reshape(-1, 1, 2), h_aligned).reshape(-1, 2)
@@ -277,32 +307,39 @@ class Page3(QWidget):
             transformed_marker_pattern_3d_aligned = np.hstack([transformed_marker_pattern_3d_aligned, np.zeros((6, 1), dtype=np.float32)])
             expected_marker_pattern_aligned = apply_transformation(transformed_marker_pattern_3d_aligned, np.linalg.inv(xy_transformation_matrix_aligned))
 
-            # Unalign the expected marker pattern points for 2D projection
-            expected_marker_pattern = [align_transform_inv_mtx @ point for point in expected_marker_pattern_aligned]
+            if len(detected_markers_2d) < len(expected_marker_pattern_aligned):
+                print("Error: Number of detected IR blobs is less than expected.")
+                return
+            
+            detected_markers_3d = []
+            for point in detected_markers_2d:
+                point_3d = approximate_intersection(plane, intrin, point[0], point[1], 0, 1000)
+                detected_markers_3d.append(point_3d)
+            
+            detected_markers_3d_aligned = [align_transform_mtx @ point for point in detected_markers_3d]
 
-            # TODO - Detect the ir markers based on the expected locations
-            detected_marker_pattern = expected_marker_pattern
-            detected_marker_pattern_aligned = expected_marker_pattern_aligned
-
-            # Project detected_marker_pattern to the image
+            # Find the closest detected blobs to the expected positions
+            detected_marker_pattern_aligned = []
             detected_marker_pattern_2d = []
-            for point in detected_marker_pattern:
-                point_2d = rs.rs2_project_point_to_pixel(intrin, point)
-                detected_marker_pattern_2d.append(point_2d)
-
-            detected_marker_pattern_2d = np.array(detected_marker_pattern_2d, dtype=np.int32)
+            for point in expected_marker_pattern_aligned:
+                distances = [np.linalg.norm(point - detected_marker) for detected_marker in detected_markers_3d_aligned]
+                closest_index = np.argmin(distances)
+                detected_marker_pattern_aligned.append(detected_markers_3d_aligned[closest_index])
+                detected_marker_pattern_2d.append(detected_markers_2d[closest_index])
+                detected_markers_3d_aligned.pop(closest_index)
+                detected_markers_2d.pop(closest_index)
 
             # Draw the best quad on the image
             cv2.polylines(color_image, [best_quad_2d], isClosed=True, color=(0, 255, 0), thickness=2)
 
-            # Draw the expected marker pattern on the image as purple outline circles
+            # Draw the detected marker pattern on the image as purple circles
             for point in detected_marker_pattern_2d:
                 cv2.circle(color_image, tuple(point), 5, (255, 0, 255), -1)
 
             # Show RGB image with detected parts
-            height, width, channel = color_image.shape
-            bytes_per_line = 3 * width
-            qt_image = QImage(color_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            height, width = color_image.shape[:2]
+            bytes_per_line = width * 3
+            qt_image = QImage(color_image.data, width, height, bytes_per_line, QImage.Format.Format_BGR888)
             pixmap = QPixmap.fromImage(qt_image)
             scaled_pixmap = pixmap.scaled(self.main_window.size() / 3, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.rgb_label.setPixmap(scaled_pixmap)
@@ -324,7 +361,7 @@ class Page3(QWidget):
             for point in points_3d_aligned:
                 ax.scatter(point[0], point[2], point[1], c='b', marker='x', s=0.5)  # Swap Y and Z
 
-            for point in expected_marker_pattern_aligned:
+            for point in detected_marker_pattern_aligned:
                 ax.scatter(point[0], point[2], point[1], c='violet', marker='o', s=10)  # Swap Y and Z
 
             ax.set_xlabel('X')
@@ -382,14 +419,16 @@ class Page3(QWidget):
     def process_frame(self, frames: rs.frame) -> None:
         color_frame = frames.get_color_frame()
         depth_frame = frames.get_depth_frame()
+        ir_frame = frames.get_infrared_frame(1)
         accel_frame = frames.first_or_default(rs.stream.accel)
         gyro_frame = frames.first_or_default(rs.stream.gyro)
 
-        if not color_frame or not depth_frame or not accel_frame or not gyro_frame:
+        if not color_frame or not ir_frame or not accel_frame or not gyro_frame:
             return
 
         self.latest_color_frame = color_frame
         self.latest_depth_frame = depth_frame
+        self.latest_ir_frame = ir_frame
 
         accel_data = accel_frame.as_motion_frame().get_motion_data()
         gyro_data = gyro_frame.as_motion_frame().get_motion_data()
