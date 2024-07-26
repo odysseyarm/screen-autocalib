@@ -47,7 +47,6 @@ class Page3(QWidget):
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
         self.screen_id = screen_id
-        self.gravity_vector: Optional[np.ndarray] = None
         self.latest_color_frame: Optional[rs.frame] = None
         self.latest_depth_frame: Optional[rs.frame] = None
         self.latest_ir_frame: Optional[rs.frame] = None
@@ -162,14 +161,11 @@ class Page3(QWidget):
         if charuco_ids is not None:
             cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners, charuco_ids, cornerColor=(0, 0, 255))
 
-            # Use the gravity vector from the Madgwick filter
-            self.gravity_vector = self.get_gravity_vector()
-
             # Extract 3D points from the depth frame
             points_3d = extract_3d_points(charuco_corners, depth_frame)
 
             # Calculate the transformation matrix and its inverse to align with gravity
-            align_transform_mtx = calculate_gravity_alignment_matrix(self.gravity_vector)
+            align_transform_mtx = quaternion.as_rotation_matrix(np.quaternion(*self.Q))
             align_transform_inv_mtx = np.linalg.inv(align_transform_mtx)
 
             # Align the 3D points with gravity
@@ -310,12 +306,12 @@ class Page3(QWidget):
             if len(detected_markers_2d) < len(expected_marker_pattern_aligned):
                 print("Error: Number of detected IR blobs is less than expected.")
                 return
-            
+
             detected_markers_3d = []
             for point in detected_markers_2d:
                 point_3d = approximate_intersection(plane, intrin, point[0], point[1], 0, 1000)
                 detected_markers_3d.append(point_3d)
-            
+
             detected_markers_3d_aligned = [align_transform_mtx @ point for point in detected_markers_3d]
 
             # Find the closest detected blobs to the expected positions
@@ -369,6 +365,7 @@ class Page3(QWidget):
             ax.set_zlabel('Y')
 
             ax.invert_zaxis() # Actually inverting y axis
+            ax.set_aspect('equal')
 
             fig.canvas.draw()
             width, height = fig.canvas.get_width_height()
@@ -390,12 +387,6 @@ class Page3(QWidget):
             self.next_button.setEnabled(True)
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
-
-    def get_gravity_vector(self) -> np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]:
-        q: np.quaternion = np.quaternion(*self.Q)
-        gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float32]] = quaternion.as_rotation_matrix(q) @ np.array([0, 1, 0], dtype=np.float32)
-        gravity_vector /= np.linalg.norm(gravity_vector)
-        return gravity_vector
 
     def save_and_exit(self) -> None:
         _user_data_dir = Path(user_data_dir("odyssey", "odysseyarm", roaming=True))
@@ -435,8 +426,6 @@ class Page3(QWidget):
 
         # Update Madgwick filter
         self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.y, gyro_data.z], acc=[accel_data.x, accel_data.z, -accel_data.y])
-
-        self.gravity_vector = self.get_gravity_vector()
 
     def start_data_acquisition(self) -> None:
         if self.pipeline:

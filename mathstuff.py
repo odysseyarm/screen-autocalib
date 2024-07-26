@@ -72,7 +72,7 @@ def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.floa
     translation_matrix[:3, 3] = -point
 
     # Combine translation and rotation to form the transformation matrix
-    transformation_matrix = np.dot(translation_matrix, rotation_matrix)
+    transformation_matrix = np.dot(rotation_matrix, translation_matrix)
 
     return transformation_matrix
 
