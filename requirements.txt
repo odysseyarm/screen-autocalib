@@ -1,0 +1,10 @@
+pyrealsense2
+numpy<2
+numpy-quaternion
+PySide6
+matplotlib
+scikit-learn
+ahrs
+opencv-python
+platformdirs
+scikit-spatial
