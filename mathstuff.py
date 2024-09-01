@@ -160,22 +160,22 @@ def calculate_gravity_alignment_matrix(gravity_vector: np.ndarray[Tuple[Literal[
 
 def marker_pattern():
     # Define the points using normalized coordinates with (0,0) as the top-left corner
-    # points = [
-    #     np.array([0.28, 0.35]),
-    #     np.array([0.25, 0.77]),
-    #     np.array([0.67, 0.73]),
-    #     np.array([0.51, 0.4]),
-    #     np.array([0.7, 0.3]),
-    #     np.array([0.49, 0.71]),
-    # ]
-
     points = [
-        np.array([-0.31944444444 + 0.5, -0.20238095238 + 0.5]),
-        np.array([-0.34722222222 + 0.5, 0.32142857142 + 0.5]),
-        np.array([0.27083333333 + 0.5, 0.28571428571 + 0.5]),
-        np.array([0.01041666666 + 0.5, -0.15476190476 + 0.5]),
-        np.array([0.29861111111 + 0.5, .25 - .5 + 0.5]),
-        np.array([-0.01041666666 + 0.5, 0.2619047619 + 0.5]),
+        np.array([0.18, 0.29]),
+        np.array([0.15, 0.82]),
+        np.array([0.77, 0.8]),
+        np.array([0.51, 0.35]),
+        np.array([0.79, 0.25]),
+        np.array([0.49, 0.76]),
     ]
+
+    # points = [
+    #     np.array([-0.31944444444 + 0.5, -0.20238095238 + 0.5]),
+    #     np.array([-0.34722222222 + 0.5, 0.32142857142 + 0.5]),
+    #     np.array([0.27083333333 + 0.5, 0.28571428571 + 0.5]),
+    #     np.array([0.01041666666 + 0.5, -0.15476190476 + 0.5]),
+    #     np.array([0.29861111111 + 0.5, .25 - .5 + 0.5]),
+    #     np.array([-0.01041666666 + 0.5, 0.2619047619 + 0.5]),
+    # ]
 
     return np.array(points)

@@ -70,7 +70,7 @@ class MainWindow(QMainWindow):
 
             # Create and configure a temporal filter
             self.temporal_filter = rs.temporal_filter()
-            self.align = rs.align(rs.stream.color)
+            self.align = rs.align(rs.stream.depth)
 
             # Pass the pipeline and filter to Page3
             self.page3.pipeline = self.pipeline

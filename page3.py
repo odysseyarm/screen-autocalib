@@ -282,7 +282,7 @@ class Page3(QWidget):
             # Apply a threshold to binarize the image
             _, binary_ir_image = cv2.threshold(ir_image, 240, 255, cv2.THRESH_BINARY)
 
-            cv2.imshow("Binary IR Image", binary_ir_image)
+            # cv2.imshow("Binary IR Image", binary_ir_image)
 
             # Find contours in the binary image
             contours, _ = cv2.findContours(binary_ir_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -377,10 +377,14 @@ class Page3(QWidget):
 
             plt.close(fig)
 
+            detected_marker_pattern_aligned = np.array(detected_marker_pattern_aligned, dtype=np.float32)
+
+            detected_marker_pattern_aligned_transformed = apply_transformation(detected_marker_pattern_aligned, xy_transformation_matrix_aligned)
+
             # set members for saving
-            self.plane = plane_aligned
-            self.homography = h_aligned
-            self.object_points = detected_marker_pattern_aligned
+            self.homography = np.linalg.inv(h_aligned)
+            self.object_points = detected_marker_pattern_aligned_transformed
+            # self.object_points = detected_marker_pattern_aligned
             self.xy_transformation_matrix = xy_transformation_matrix_aligned
 
             # Enable the "Done" button after showing the results
@@ -397,10 +401,6 @@ class Page3(QWidget):
         print(f"Saving calibration data to {screen_path} then exiting")
         with io.open(screen_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps({
-                "plane": {
-                    "origin": self.plane[0].tolist(),
-                    "normal": self.plane[1].tolist(),
-                },
                 "homography": self.homography.flatten().tolist(),
                 "object_points": self.object_points.tolist(),
                 "xy_transform": self.xy_transformation_matrix.flatten().tolist(),
@@ -408,9 +408,10 @@ class Page3(QWidget):
         self.exit_application()
 
     def process_frame(self, frames: rs.frame) -> None:
-        color_frame = frames.get_color_frame()
-        depth_frame = frames.get_depth_frame()
-        ir_frame = frames.get_infrared_frame(1)
+        aligned_frames = self.align.process(frames)
+        color_frame = aligned_frames.get_color_frame()
+        depth_frame = aligned_frames.get_depth_frame()
+        ir_frame = aligned_frames.get_infrared_frame(0)
         accel_frame = frames.first_or_default(rs.stream.accel)
         gyro_frame = frames.first_or_default(rs.stream.gyro)
 
