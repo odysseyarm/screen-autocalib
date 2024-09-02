@@ -112,7 +112,7 @@ class Page3(QWidget):
 
     def on_go_clicked(self) -> None:
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
-        QTimer.singleShot(1000, self.detect_charuco_corners)  # type: ignore
+        QTimer.singleShot(3000, self.detect_charuco_corners)  # type: ignore
 
     def create_charuco_board(self) -> None:
         # Create the ChArUco board
@@ -208,6 +208,9 @@ class Page3(QWidget):
 
             # Fit a plane using the custom plane fitting function
             plane = plane_from_points(detected_points)
+            if plane is None:
+                self.stacked_layout.setCurrentWidget(self.initial_widget)
+                return
 
             # Deproject the detected points to the 3D plane using transformed intrinsics
             deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
