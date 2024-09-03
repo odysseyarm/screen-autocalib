@@ -262,6 +262,22 @@ class Page3(QWidget):
             # Map the unit square corners to the plane's coordinate system using homography
             transformed_unit_square_2d_aligned = cv2.perspectiveTransform(normalized_corners.reshape(-1, 1, 2), h_aligned)
 
+            # Translate transformed_unit_square_2d_aligned, h_aligned, and xy_transformation_matrix_aligned by -transformed_unit_square_2d_aligned[0][0]
+            offset_mtx = np.array([
+                [1, 0, -transformed_unit_square_2d_aligned[0][0][0]],
+                [0, 1, -transformed_unit_square_2d_aligned[0][0][1]],
+                [0, 0, 1]
+            ], dtype=np.float64)
+            offset_mtx_3d = np.array([
+                [1, 0, 0, -transformed_unit_square_2d_aligned[0][0][0]],
+                [0, 1, 0, -transformed_unit_square_2d_aligned[0][0][1]],
+                [0, 0, 1, 0],
+                [0, 0, 0, 1]
+            ], dtype=np.float64)
+            h_aligned = offset_mtx @ h_aligned
+            xy_transformation_matrix_aligned = offset_mtx_3d @ xy_transformation_matrix_aligned
+            transformed_unit_square_2d_aligned = cv2.perspectiveTransform(normalized_corners.reshape(-1, 1, 2), h_aligned)
+
             # Transform the resulting 2D points back to the 3D plane
             transformed_unit_square_3d_aligned = transformed_unit_square_2d_aligned.reshape(-1, 2)
             transformed_unit_square_3d_aligned = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_unit_square_3d_aligned)

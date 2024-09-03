@@ -56,21 +56,17 @@ def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.floa
 
     # Normalize the normal vector
     normal = normal / np.linalg.norm(normal)
-
-    # Find two vectors orthogonal to the normal vector
-    if np.abs(normal[0]) > np.abs(normal[2]):
-        v = np.array([-normal[1], normal[0], 0], dtype=np.float64)
+    if normal[2] > 0:
+        z = normal
     else:
-        v = np.array([0, -normal[2], normal[1]], dtype=np.float64)
-    v = v / np.linalg.norm(v)
+        z = -normal
 
-    # Create the orthonormal basis
-    u = np.cross(normal, v)
-    u = u / np.linalg.norm(u)
+    x = np.cross(np.array([0, 1, 0]), z)
+    y = np.cross(z, x)
 
     # Construct the rotation matrix (column-major)
     rotation_matrix = np.eye(4, dtype=np.float64)
-    rotation_matrix[:3, :3] = np.array([u, v, normal], dtype=np.float64)
+    rotation_matrix[:3, :3] = np.array([x, y, z], dtype=np.float64)
 
     # Construct the translation matrix (column-major)
     translation_matrix = np.eye(4, dtype=np.float64)
