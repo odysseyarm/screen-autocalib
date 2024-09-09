@@ -133,8 +133,12 @@ class Page3(QWidget):
         self.label.setPixmap(pixmap)
 
     def detect_charuco_corners(self) -> None:
+        def fail(msg: str) -> None:
+            print(f"Detection failure: {msg}")
+            self.stacked_layout.setCurrentWidget(self.initial_widget)
+
         if not self.latest_color_frame or not self.latest_depth_frame or not self.latest_ir_frame:
-            print("Error: No frames available for ChArUco board detection.")
+            fail("No frames available for ChArUco board detection.")
             return
 
         color_frame = self.latest_color_frame
@@ -209,7 +213,7 @@ class Page3(QWidget):
             # Fit a plane using the custom plane fitting function
             plane = plane_from_points(detected_points)
             if plane is None:
-                self.stacked_layout.setCurrentWidget(self.initial_widget)
+                fail("Plane fitting failed")
                 return
 
             # Deproject the detected points to the 3D plane using transformed intrinsics
@@ -226,7 +230,7 @@ class Page3(QWidget):
 
             # Ensure deprojected_points are distinct
             if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
-                print("Error: Deprojected points are not distinct.")
+                fail("Deprojected points are not distinct.")
                 return
 
             # Find transformation matrix that aligns the plane with the XY plane
@@ -323,7 +327,7 @@ class Page3(QWidget):
             expected_marker_pattern_aligned = apply_transformation(transformed_marker_pattern_3d_aligned, np.linalg.inv(xy_transformation_matrix_aligned))
 
             if len(detected_markers_2d) < len(expected_marker_pattern_aligned):
-                print("Error: Number of detected IR blobs is less than expected.")
+                fail("Number of detected IR blobs is less than expected.")
                 return
 
             detected_markers_3d = []
