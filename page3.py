@@ -39,7 +39,7 @@ def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_fra
     return points_3d
 
 class Page3(QWidget):
-    def __init__(self, parent: QWidget, exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], screen_id: int) -> None:
+    def __init__(self, parent: QWidget, exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], screen_id: int, output_dir: str, auto_progress: bool) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.exit_application = exit_application
@@ -47,6 +47,10 @@ class Page3(QWidget):
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
         self.screen_id = screen_id
+        self.output_dir = output_dir
+        self.auto_progress = auto_progress
+        self.go_countdown_time = 3
+        self.done_countdown_time = 10
         self.latest_color_frame: Optional[rs.frame] = None
         self.latest_depth_frame: Optional[rs.frame] = None
         self.latest_ir_frame: Optional[rs.frame] = None
@@ -107,6 +111,46 @@ class Page3(QWidget):
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
+    def start(self) -> None:
+        if self.auto_progress:
+            self.start_go_countdown()
+        self.start_data_acquisition()
+
+    def start_go_countdown(self) -> None:
+        """Start the countdown for the initial 'Go'."""
+        self.go_timer = QTimer(self)
+        self.go_timer.timeout.connect(self.update_go_countdown)
+        self.go_timer.start(1000)
+
+    def update_go_countdown(self) -> None:
+        """Update the 'Going in t' countdown."""
+        self.go_countdown_time -= 1
+        self.instructions_label.setText(f"Going in {self.go_countdown_time}")
+        if self.go_countdown_time <= 0:
+            self.go_timer.stop()
+            self.on_go_clicked()
+
+    def start_done_countdown(self, success: bool) -> None:
+        """Start the countdown after 'Done' or 'Autocalibration unsuccessful'."""
+        self.done_timer = QTimer(self)
+        self.done_timer.timeout.connect(lambda: self.update_done_countdown(success))
+        self.done_timer.start(1000)
+
+    def update_done_countdown(self, success: bool) -> None:
+        """Update the countdown based on whether the calibration was successful or not."""
+        self.done_countdown_time -= 1
+        if success:
+            self.instructions_label.setText(f"Done in {self.done_countdown_time}")
+        else:
+            self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.done_countdown_time}")
+        
+        if self.done_countdown_time <= 0:
+            self.done_timer.stop()
+            if success:
+                self.save_and_exit()
+            else:
+                self.exit_application()
+
     def resizeEvent(self, event: Any) -> None:
         self.create_charuco_board()
 
@@ -135,6 +179,8 @@ class Page3(QWidget):
     def detect_charuco_corners(self) -> None:
         def fail(msg: str) -> None:
             print(f"Detection failure: {msg}")
+            self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.done_countdown_time}")
+            self.start_done_countdown(success=False)
             self.stacked_layout.setCurrentWidget(self.initial_widget)
 
         if not self.latest_color_frame or not self.latest_depth_frame or not self.latest_ir_frame:
@@ -160,7 +206,7 @@ class Page3(QWidget):
         gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
 
         charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
-        charuco_ids = cast(Optional[cv2.typing.MatLike], charuco_ids)  # OpenCV typings are missing "| None" in several places
+        charuco_ids = cast(Optional["cv2.typing.MatLike"], charuco_ids)  # OpenCV typings are missing "| None" in several places
 
         if charuco_ids is not None:
             cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners, charuco_ids, cornerColor=(0, 0, 255))
@@ -247,7 +293,7 @@ class Page3(QWidget):
 
             # Map the unit square corners to the plane's coordinate system using homography
             h_aligned, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
-            h_aligned = cast(Optional[cv2.typing.MatLike], h_aligned)  # OpenCV typings are missing "| None" in several places
+            h_aligned = cast(Optional["cv2.typing.MatLike"], h_aligned)  # OpenCV typings are missing "| None" in several places
 
             if h_aligned is None:
                 print("Error: Homography could not be computed.")
@@ -410,21 +456,38 @@ class Page3(QWidget):
 
             # Enable the "Done" button after showing the results
             self.next_button.setEnabled(True)
+        else:
+            fail("No ChArUco board detected.")
+            return
+
+        self.instructions_label.setText(f"Done in {self.done_countdown_time}")
+        self.next_button.setEnabled(True)
+        self.start_done_countdown(success=True)
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
     def save_and_exit(self) -> None:
-        _user_data_dir = Path(user_data_dir("odyssey", "odysseyarm", roaming=True))
+        if self.output_dir:
+            _user_data_dir = Path(self.output_dir)
+        else:
+            _user_data_dir = Path(user_data_dir("odyssey", "odysseyarm", roaming=True))
+
         screens_dir = _user_data_dir.joinpath("screens")
         if not screens_dir.exists():
             screens_dir.mkdir(parents=True)
+
         screen_path = screens_dir.joinpath(f"screen_{self.screen_id}.json")
-        print(f"Saving calibration data to {screen_path} then exiting")
+
+        print(f"Saving calibration data to {screen_path}...")
+
         with io.open(screen_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps({
                 "homography": self.homography.flatten().tolist(),
                 "object_points": self.object_points.tolist(),
             }))
+        
+        print("Saved. Exiting application.")
+
         self.exit_application()
 
     def process_frame(self, frames: rs.frame) -> None:

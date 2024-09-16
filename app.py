@@ -13,6 +13,9 @@ class MainWindow(QMainWindow):
             self.bag_file = args.bag
         else:
             self.bag_file = None
+        
+        if not args.dir:
+            args.dir = None
 
         super().__init__()
 
@@ -22,8 +25,8 @@ class MainWindow(QMainWindow):
         self.pipeline: Optional[rs.pipeline] = None
 
         # Create instances of pages
-        self.page2 = Page2(self, self.goto_page3, self.exit_application)
-        self.page3 = Page3(self, self.exit_application, self.pipeline, args.screen)
+        self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress)
+        self.page3 = Page3(self, self.exit_application, self.pipeline, args.screen, args.dir, args.auto_progress)
 
         self.stacked_widget.addWidget(self.page2)
         self.stacked_widget.addWidget(self.page3)
@@ -87,7 +90,7 @@ class MainWindow(QMainWindow):
             self.exit_application()
 
     def goto_page3(self) -> None:
-        self.page3.start_data_acquisition()
+        self.page3.start()
         self.stacked_widget.setCurrentWidget(self.page3)
 
     def goto_page2(self) -> None:
@@ -104,6 +107,8 @@ if __name__ == "__main__":
     parser.add_argument('--display', type=int, default=0, help='Display index to use')
     parser.add_argument('--bag', type=str, help='Bag file to stream')
     parser.add_argument('--screen', type=int, default=0, help='Screen to save the calibration file for')
+    parser.add_argument('--dir', type=str, help='Output directory for calibration file')
+    parser.add_argument('--auto-progress', default=False, action="store_true", help='Enable auto-progress mode')
     args = parser.parse_args()
 
     app = QApplication(sys.argv)

@@ -38,13 +38,16 @@ class BracketOverlay(QWidget):
         painter.drawLine(window_width - 1, window_height - 50, window_width - 1, window_height - 1)
 
 class Page2(QWidget):
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None]) -> None:
+    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], auto_progress: bool) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.next_page = next_page
         self.exit_application = exit_application
+        self.auto_progress = auto_progress
         self.pipeline: Optional[rs.pipeline] = None
         self.data_thread: Optional[DataAcquisitionThread] = None
+        self.countdown_timer = None
+        self.remaining_time = 30
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -64,15 +67,24 @@ class Page2(QWidget):
         self.bracket_overlay = BracketOverlay(self)
         self.bracket_overlay.resize(self.size())
 
+        self.countdown_label = QLabel("30", self)
+        self.countdown_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.countdown_label.setVisible(False)  # Initially hidden
+        layout.addWidget(self.countdown_label)
+
         button_layout = QHBoxLayout()
         self.next_button = QPushButton("Next")
         self.next_button.clicked.connect(self.next_page)
-        self.next_button.setVisible(False)
         button_layout.addWidget(self.next_button)
 
         self.exit_button = QPushButton("Exit")
         self.exit_button.clicked.connect(self.exit_application)
         button_layout.addWidget(self.exit_button)
+
+        if self.auto_progress:
+            self.next_button.setVisible(False)
+            self.exit_button.setVisible(False)
+            self.countdown_label.setVisible(True)  # Show countdown if auto_progress
 
         layout.addLayout(button_layout)
 
@@ -98,7 +110,22 @@ class Page2(QWidget):
         self.data_thread.data_updated.connect(self.process_frame)
         self.data_thread.start()
 
+        if self.auto_progress:
+            self.start_countdown()
+
         self.next_button.setVisible(True)
+
+    def start_countdown(self) -> None:
+        self.countdown_timer = QTimer(self)
+        self.countdown_timer.timeout.connect(self.update_countdown)
+        self.countdown_timer.start(1000)  # Trigger every second
+
+    def update_countdown(self) -> None:
+        self.remaining_time -= 1
+        self.countdown_label.setText(str(self.remaining_time))
+        if self.remaining_time <= 0:
+            self.countdown_timer.stop()
+            self.next_page()
 
     def resizeEvent(self, event: QEvent) -> None:
         super().resizeEvent(event)
