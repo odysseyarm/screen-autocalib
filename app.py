@@ -59,8 +59,8 @@ class MainWindow(QMainWindow):
                 config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
                 config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
                 config.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
-                config.enable_stream(rs.stream.accel)
-                config.enable_stream(rs.stream.gyro)
+                # config.enable_stream(rs.stream.accel)
+                # config.enable_stream(rs.stream.gyro)
                 print("Streaming from RealSense camera.")
 
                 self.pipeline_profile = self.pipeline.start(config)
