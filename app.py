@@ -16,6 +16,9 @@ class MainWindow(QMainWindow):
         
         if not args.dir:
             args.dir = None
+        
+        if not args.depth_from_markers:
+            args.depth_from_markers = False
 
         super().__init__()
 
@@ -26,7 +29,7 @@ class MainWindow(QMainWindow):
 
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress)
-        self.page3 = Page3(self, self.exit_application, self.pipeline, args.screen, args.dir, args.auto_progress)
+        self.page3 = Page3(self, self.exit_application, self.pipeline, args.screen, args.dir, args.auto_progress, args.depth_from_markers)
 
         self.stacked_widget.addWidget(self.page2)
         self.stacked_widget.addWidget(self.page3)
@@ -70,14 +73,25 @@ class MainWindow(QMainWindow):
                 if depth_sensor:
                     depth_sensor.set_option(rs.option.exposure, 1500)
                     depth_sensor.set_option(rs.option.enable_auto_exposure, 0)
+                
+                color_sensor = self.pipeline_profile.get_device().first_color_sensor()
+                if color_sensor:
+                    color_sensor.set_option(rs.option.exposure, 1000)
+                    color_sensor.set_option(rs.option.enable_auto_exposure, 0)
 
             # Create and configure a temporal filter
             self.temporal_filter = rs.temporal_filter()
+            self.temporal_filter.set_option(rs.option.filter_smooth_alpha, .05)
+            self.temporal_filter.set_option(rs.option.filter_smooth_delta, 20)
+
+            self.hole_filter = rs.hole_filling_filter()
+            self.hole_filter.set_option(rs.option.holes_fill, 2)
             self.align = rs.align(rs.stream.depth)
 
             # Pass the pipeline and filter to Page3
             self.page3.pipeline = self.pipeline
             self.page3.temporal_filter = self.temporal_filter
+            self.page3.hole_filter = self.hole_filter
             self.page3.align = self.align
 
             # Pass the pipeline to Page2
@@ -109,6 +123,7 @@ if __name__ == "__main__":
     parser.add_argument('--screen', type=int, default=0, help='Screen to save the calibration file for')
     parser.add_argument('--dir', type=str, help='Output directory for calibration file')
     parser.add_argument('--auto-progress', default=False, action="store_true", help='Enable auto-progress mode')
+    parser.add_argument('--depth-from-markers', default=False, action="store_true", help='Use depth from markers instead of from screen')
     args = parser.parse_args()
 
     app = QApplication(sys.argv)

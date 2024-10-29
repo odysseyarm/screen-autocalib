@@ -19,20 +19,18 @@ class PlaneModel(BaseEstimator, RegressorMixin):
         d = -self.point_.dot(self.normal_)
         return (-self.normal_[0] * X[:, 0] - self.normal_[1] * X[:, 1] - d) / self.normal_[2] # type: ignore
 
-def plane_from_points(points: npt.NDArray[np.float32]) -> Optional[Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]]:
+def plane_from_points(points: npt.NDArray[np.float32], min_samples: int) -> Optional[Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]]:
     # Prepare data for RANSAC
     X = points[:, :2]  # X and Y coordinates
     y = points[:, 2]   # Z coordinate
 
-    _min_samples = 15
-
-    if len(points) < _min_samples:
+    if len(points) < min_samples:
         return None
 
     # Fit RANSAC regressor with PlaneModel
     ransac = RANSACRegressor(
         PlaneModel(), 
-        min_samples=_min_samples,  # Minimum number of samples to define a plane
+        min_samples=min_samples,  # Minimum number of samples to define a plane
         residual_threshold=0.01, 
         max_trials=10000
     )

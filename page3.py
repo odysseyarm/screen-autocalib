@@ -39,12 +39,13 @@ def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_fra
     return points_3d
 
 class Page3(QWidget):
-    def __init__(self, parent: QWidget, exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], screen_id: int, output_dir: str, auto_progress: bool) -> None:
+    def __init__(self, parent: QWidget, exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], screen_id: int, output_dir: str, auto_progress: bool, depth_from_markers: bool) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.exit_application = exit_application
         self.pipeline = pipeline
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
+        self.hole_filter: Optional[rs.hole_filling_filter] = None  # Placeholder for the hole filling filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
         self.screen_id = screen_id
         self.output_dir = output_dir
@@ -57,6 +58,7 @@ class Page3(QWidget):
         self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
         # self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
         self.data_thread: Optional[DataAcquisitionThread] = None
+        self.depth_from_markers = depth_from_markers
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -180,7 +182,8 @@ class Page3(QWidget):
         def fail(msg: str) -> None:
             print(f"Detection failure: {msg}")
             self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.done_countdown_time}")
-            self.start_done_countdown(success=False)
+            if self.auto_progress:
+                self.start_done_countdown(success=False)
             self.stacked_layout.setCurrentWidget(self.initial_widget)
 
         if not self.latest_color_frame or not self.latest_depth_frame or not self.latest_ir_frame:
@@ -258,8 +261,31 @@ class Page3(QWidget):
             expected_points = np.array(expected_points, dtype=np.float32)
             detected_points = np.array(detected_points, dtype=np.float32)
 
+            # Detect IR blobs in the depth image
+            ir_image = ir_image.astype(np.uint8)
+
+            # Apply a threshold to binarize the image
+            _, binary_ir_image = cv2.threshold(ir_image, 240, 255, cv2.THRESH_BINARY)
+
+            # Find contours in the binary image
+            contours, _ = cv2.findContours(binary_ir_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            detected_markers_2d = []
+            for cnt in contours:
+                if cv2.contourArea(cnt) > 20:  # Filter small contours
+                    M = cv2.moments(cnt)
+                    if M['m00'] != 0:
+                        cx = int(M['m10'] / M['m00'])
+                        cy = int(M['m01'] / M['m00'])
+                        detected_markers_2d.append([cx, cy])
+
             # Fit a plane using the custom plane fitting function
-            plane = plane_from_points(detected_points)
+            if self.depth_from_markers:
+                detected_markers_3d = extract_3d_points(np.array(detected_markers_2d, dtype=np.float32), depth_frame)
+                detected_markers_3d = np.array(detected_markers_3d, dtype=np.float32)
+                plane = plane_from_points(detected_markers_3d, 6)
+            else:
+                plane = plane_from_points(detected_points, 15)
             if plane is None:
                 fail("Plane fitting failed")
                 return
@@ -273,9 +299,10 @@ class Page3(QWidget):
             deprojected_points_aligned = [align_transform_mtx @ point for point in deprojected_points]
             deprojected_points_aligned = np.array(deprojected_points_aligned, dtype=np.float32)
 
-            # rotate plane to align with gravity
+            # rotate plane to align with gravite
             plane_aligned = (align_transform_mtx @ plane[0], align_transform_mtx @ plane[1])
 
+            print(deprojected_points_aligned)
             # Ensure deprojected_points are distinct
             if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
                 fail("Deprojected points are not distinct.")
@@ -347,25 +374,7 @@ class Page3(QWidget):
 
             best_quad_2d = np.array(best_quad_2d, dtype=np.int32)
 
-            # Detect IR blobs in the depth image
-            ir_image = ir_image.astype(np.uint8)
-
-            # Apply a threshold to binarize the image
-            _, binary_ir_image = cv2.threshold(ir_image, 240, 255, cv2.THRESH_BINARY)
-
             # cv2.imshow("Binary IR Image", binary_ir_image)
-
-            # Find contours in the binary image
-            contours, _ = cv2.findContours(binary_ir_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-            detected_markers_2d = []
-            for cnt in contours:
-                if cv2.contourArea(cnt) > 20:  # Filter small contours
-                    M = cv2.moments(cnt)
-                    if M['m00'] != 0:
-                        cx = int(M['m10'] / M['m00'])
-                        cy = int(M['m01'] / M['m00'])
-                        detected_markers_2d.append([cx, cy])
 
             # Find the expected ir marker locations
             normalized_marker_pattern = marker_pattern()
@@ -382,6 +391,8 @@ class Page3(QWidget):
             for point in detected_markers_2d:
                 point_3d = approximate_intersection(plane, intrin, point[0], point[1], 0, 1000)
                 detected_markers_3d.append(point_3d)
+            
+            print("Detected markers 3D: ", detected_markers_3d)
 
             detected_markers_3d_aligned = [align_transform_mtx @ point for point in detected_markers_3d]
 
@@ -464,7 +475,8 @@ class Page3(QWidget):
 
         self.instructions_label.setText(f"Done in {self.done_countdown_time}")
         self.next_button.setEnabled(True)
-        self.start_done_countdown(success=True)
+        if self.auto_progress:
+            self.start_done_countdown(success=True)
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
@@ -493,6 +505,8 @@ class Page3(QWidget):
         self.exit_application()
 
     def process_frame(self, frames: rs.frame) -> None:
+        # frames = self.temporal_filter.process(frames)
+        frames = self.hole_filter.process(frames).as_frameset()
         aligned_frames = self.align.process(frames)
         color_frame = aligned_frames.get_color_frame()
         depth_frame = aligned_frames.get_depth_frame()
