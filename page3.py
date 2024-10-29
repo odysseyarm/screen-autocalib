@@ -411,8 +411,9 @@ class Page3(QWidget):
             cv2.polylines(color_image, [best_quad_2d], isClosed=True, color=(0, 255, 0), thickness=2)
 
             # Draw the detected marker pattern on the image as purple circles
-            for point in detected_marker_pattern_2d:
+            for i,point in enumerate(detected_marker_pattern_2d):
                 cv2.circle(color_image, tuple(point), 5, (255, 0, 255), -1)
+                cv2.putText(color_image, str(i), tuple(point), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
             # Show RGB image with detected parts
             height, width = color_image.shape[:2]

@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
                 
                 color_sensor = self.pipeline_profile.get_device().first_color_sensor()
                 if color_sensor:
-                    color_sensor.set_option(rs.option.exposure, 1000)
+                    color_sensor.set_option(rs.option.exposure, 1500)
                     color_sensor.set_option(rs.option.enable_auto_exposure, 0)
 
             # Create and configure a temporal filter
