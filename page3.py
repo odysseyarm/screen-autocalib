@@ -12,6 +12,7 @@ from platformdirs import user_data_dir
 from pathlib import Path
 import io
 import json
+import time
 from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
 from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern
@@ -39,11 +40,12 @@ def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_fra
     return points_3d
 
 class Page3(QWidget):
-    def __init__(self, parent: QWidget, exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], screen_id: int, output_dir: str, auto_progress: bool, depth_from_markers: bool) -> None:
+    def __init__(self, parent: QWidget, exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], screen_id: int, output_dir: str, auto_progress: bool, depth_from_markers: bool, ir_low_exposure: float) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.exit_application = exit_application
         self.pipeline = pipeline
+        self.pipeline_profile = None
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
         self.hole_filter: Optional[rs.hole_filling_filter] = None  # Placeholder for the hole filling filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
@@ -59,6 +61,7 @@ class Page3(QWidget):
         # self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
         self.data_thread: Optional[DataAcquisitionThread] = None
         self.depth_from_markers = depth_from_markers
+        self.ir_low_exposure = ir_low_exposure
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -145,7 +148,7 @@ class Page3(QWidget):
             self.instructions_label.setText(f"Done in {self.done_countdown_time}")
         else:
             self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.done_countdown_time}")
-        
+
         if self.done_countdown_time <= 0:
             self.done_timer.stop()
             if success:
@@ -178,24 +181,36 @@ class Page3(QWidget):
 
         self.label.setPixmap(pixmap)
 
-    def detect_charuco_corners(self) -> None:
-        def fail(msg: str) -> None:
-            print(f"Detection failure: {msg}")
-            self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.done_countdown_time}")
-            if self.auto_progress:
-                self.start_done_countdown(success=False)
-            self.stacked_layout.setCurrentWidget(self.initial_widget)
+    def fail(self, msg: str) -> None:
+        print(f"Detection failure: {msg}")
+        self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.done_countdown_time}")
+        if self.auto_progress:
+            self.start_done_countdown(success=False)
+        self.stacked_layout.setCurrentWidget(self.initial_widget)
 
+    def detect_charuco_corners(self) -> None:
         if not self.latest_color_frame or not self.latest_depth_frame or not self.latest_ir_frame:
-            fail("No frames available for ChArUco board detection.")
+            self.fail("No frames available for ChArUco board detection.")
             return
 
         color_frame = self.latest_color_frame
         depth_frame = self.latest_depth_frame
-        ir_frame = self.latest_ir_frame
+        self.latest_ir_frame = None
+        self.latest_depth_frame = None
+
+        depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
+        depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
+        QTimer.singleShot(500, lambda: self._detect_charuco_corners_continued(color_frame, depth_frame))
+
+    def _detect_charuco_corners_continued(self, color_frame, depth_frame):
+        markers_ir_frame = self.latest_ir_frame
+        markers_depth_frame = self.latest_depth_frame
+        if markers_ir_frame is None or markers_depth_frame is None:
+            self.fail("No frames for marker detection")
+
 
         color_image = np.asanyarray(color_frame.get_data())
-        ir_image = np.asanyarray(ir_frame.get_data())
+        markers_ir_image = np.asanyarray(markers_ir_frame.get_data())
 
         # Detect ChArUco board corners
         aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
@@ -262,16 +277,17 @@ class Page3(QWidget):
             detected_points = np.array(detected_points, dtype=np.float32)
 
             # Detect IR blobs in the depth image
-            ir_image = ir_image.astype(np.uint8)
+            ir_image = markers_ir_image.astype(np.uint8)
 
             # Apply a threshold to binarize the image
-            _, binary_ir_image = cv2.threshold(ir_image, 240, 255, cv2.THRESH_BINARY)
+            _, binary_ir_image = cv2.threshold(ir_image, 100, 255, cv2.THRESH_BINARY)
 
             # Find contours in the binary image
             contours, _ = cv2.findContours(binary_ir_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
             detected_markers_2d = []
             for cnt in contours:
+                print(f"Contour area: {cv2.contourArea(cnt)}")
                 if cv2.contourArea(cnt) > 20:  # Filter small contours
                     M = cv2.moments(cnt)
                     if M['m00'] != 0:
@@ -281,13 +297,13 @@ class Page3(QWidget):
 
             # Fit a plane using the custom plane fitting function
             if self.depth_from_markers:
-                detected_markers_3d = extract_3d_points(np.array(detected_markers_2d, dtype=np.float32), depth_frame)
+                detected_markers_3d = extract_3d_points(np.array(detected_markers_2d, dtype=np.float32), markers_depth_frame)
                 detected_markers_3d = np.array(detected_markers_3d, dtype=np.float32)
                 plane = plane_from_points(detected_markers_3d, 6)
             else:
                 plane = plane_from_points(detected_points, 15)
             if plane is None:
-                fail("Plane fitting failed")
+                self.fail("Plane fitting failed")
                 return
 
             # Deproject the detected points to the 3D plane using transformed intrinsics
@@ -305,7 +321,7 @@ class Page3(QWidget):
             print(deprojected_points_aligned)
             # Ensure deprojected_points are distinct
             if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
-                fail("Deprojected points are not distinct.")
+                self.fail("Deprojected points are not distinct.")
                 return
 
             # Find transformation matrix that aligns the plane with the XY plane
@@ -384,7 +400,7 @@ class Page3(QWidget):
             expected_marker_pattern_aligned = apply_transformation(transformed_marker_pattern_3d_aligned, np.linalg.inv(xy_transformation_matrix_aligned))
 
             if len(detected_markers_2d) < len(expected_marker_pattern_aligned):
-                fail("Number of detected IR blobs is less than expected.")
+                self.fail("Number of detected IR blobs is less than expected.")
                 return
 
             detected_markers_3d = []
@@ -471,7 +487,7 @@ class Page3(QWidget):
             # Enable the "Done" button after showing the results
             self.next_button.setEnabled(True)
         else:
-            fail("No ChArUco board detected.")
+            self.fail("No ChArUco board detected.")
             return
 
         self.instructions_label.setText(f"Done in {self.done_countdown_time}")

@@ -9,14 +9,15 @@ from typing import Optional
 
 class MainWindow(QMainWindow):
     def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
         if args.bag:
             self.bag_file = args.bag
         else:
             self.bag_file = None
-        
+
         if not args.dir:
             args.dir = None
-        
+
         if not args.depth_from_markers:
             args.depth_from_markers = False
 
@@ -29,7 +30,7 @@ class MainWindow(QMainWindow):
 
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress)
-        self.page3 = Page3(self, self.exit_application, self.pipeline, args.screen, args.dir, args.auto_progress, args.depth_from_markers)
+        self.page3 = Page3(self, self.exit_application, self.pipeline, args.screen, args.dir, args.auto_progress, args.depth_from_markers, args.ir_low_exposure)
 
         self.stacked_widget.addWidget(self.page2)
         self.stacked_widget.addWidget(self.page3)
@@ -59,9 +60,9 @@ class MainWindow(QMainWindow):
                 if len(context.query_devices()) == 0:
                     raise Exception("No RealSense device detected.")
 
-                config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-                config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-                config.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
+                config.enable_stream(rs.stream.color, 848, 480, rs.format.bgr8, 30)
+                config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
+                config.enable_stream(rs.stream.infrared, 1, 848, 480, rs.format.y8, 30)
                 # config.enable_stream(rs.stream.accel)
                 # config.enable_stream(rs.stream.gyro)
                 print("Streaming from RealSense camera.")
@@ -71,13 +72,14 @@ class MainWindow(QMainWindow):
                 # Set fixed exposure and disable auto exposure for depth stream
                 depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
                 if depth_sensor:
-                    depth_sensor.set_option(rs.option.exposure, 1500)
                     depth_sensor.set_option(rs.option.enable_auto_exposure, 0)
-                
+                    depth_sensor.set_option(rs.option.exposure, self.args.ir_high_exposure)
+                    depth_sensor.set_option(rs.option.laser_power, self.args.laser_power)
+
                 color_sensor = self.pipeline_profile.get_device().first_color_sensor()
                 if color_sensor:
-                    color_sensor.set_option(rs.option.exposure, 1500)
                     color_sensor.set_option(rs.option.enable_auto_exposure, 0)
+                    color_sensor.set_option(rs.option.exposure, self.args.rgb_exposure)
 
             # Create and configure a temporal filter
             self.temporal_filter = rs.temporal_filter()
@@ -90,6 +92,7 @@ class MainWindow(QMainWindow):
 
             # Pass the pipeline and filter to Page3
             self.page3.pipeline = self.pipeline
+            self.page3.pipeline_profile = self.pipeline_profile
             self.page3.temporal_filter = self.temporal_filter
             self.page3.hole_filter = self.hole_filter
             self.page3.align = self.align
@@ -124,6 +127,10 @@ if __name__ == "__main__":
     parser.add_argument('--dir', type=str, help='Output directory for calibration file')
     parser.add_argument('--auto-progress', default=False, action="store_true", help='Enable auto-progress mode')
     parser.add_argument('--depth-from-markers', default=False, action="store_true", help='Use depth from markers instead of from screen')
+    parser.add_argument('--ir-high-exposure', default=1500, type=float, help='IR camera exposure to use when capturing the screen')
+    parser.add_argument('--ir-low-exposure', default=1, type=float, help='IR camera exposure to use when capturing the markers')
+    parser.add_argument('--rgb-exposure', default=1500, type=float, help='RGB camera exposure')
+    parser.add_argument('--laser-power', default=150, type=float, help='Laser dot grid projector power (0-360)')
     args = parser.parse_args()
 
     app = QApplication(sys.argv)

@@ -25,6 +25,7 @@ def plane_from_points(points: npt.NDArray[np.float32], min_samples: int) -> Opti
     y = points[:, 2]   # Z coordinate
 
     if len(points) < min_samples:
+        print(f"Only got {len(points)} points")
         return None
 
     # Fit RANSAC regressor with PlaneModel
