@@ -280,7 +280,7 @@ class Page3(QWidget):
             ir_image = markers_ir_image.astype(np.uint8)
 
             # Apply a threshold to binarize the image
-            _, binary_ir_image = cv2.threshold(ir_image, 100, 255, cv2.THRESH_BINARY)
+            _, binary_ir_image = cv2.threshold(ir_image, 150, 255, cv2.THRESH_BINARY)
 
             # Find contours in the binary image
             contours, _ = cv2.findContours(binary_ir_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
