@@ -50,6 +50,8 @@ class MainWindow(QMainWindow):
         config = rs.config()
 
         try:
+            motion_support = False
+
             if self.bag_file:
                 config.enable_device_from_file(self.bag_file)
                 print(f"Streaming from bag file: {self.bag_file}")
@@ -57,14 +59,23 @@ class MainWindow(QMainWindow):
             else:
                 # Check if any RealSense devices are connected
                 context = rs.context()
-                if len(context.query_devices()) == 0:
+                devices = context.query_devices()
+                if len(devices) == 0:
                     raise Exception("No RealSense device detected.")
+
+                for dev in devices:
+                    for sensor in dev.query_sensors():
+                        if sensor.is_motion_sensor():
+                            motion_support = True
 
                 config.enable_stream(rs.stream.color, 848, 480, rs.format.bgr8, 30)
                 config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
                 config.enable_stream(rs.stream.infrared, 1, 848, 480, rs.format.y8, 30)
-                # config.enable_stream(rs.stream.accel)
-                # config.enable_stream(rs.stream.gyro)
+
+                if motion_support:
+                    config.enable_stream(rs.stream.accel)
+                    config.enable_stream(rs.stream.gyro)
+
                 print("Streaming from RealSense camera.")
 
                 self.pipeline_profile = self.pipeline.start(config)
@@ -96,6 +107,7 @@ class MainWindow(QMainWindow):
             self.page3.temporal_filter = self.temporal_filter
             self.page3.hole_filter = self.hole_filter
             self.page3.align = self.align
+            self.page3.motion_support = motion_support
 
             # Pass the pipeline to Page2
             self.page2.pipeline = self.pipeline

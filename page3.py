@@ -44,6 +44,7 @@ class Page3(QWidget):
         super().__init__(parent)
         self.main_window = parent
         self.exit_application = exit_application
+        self.motion_support = False
         self.pipeline = pipeline
         self.pipeline_profile = None
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
@@ -58,7 +59,7 @@ class Page3(QWidget):
         self.latest_depth_frame: Optional[rs.frame] = None
         self.latest_ir_frame: Optional[rs.frame] = None
         self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
-        # self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
+        self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
         self.data_thread: Optional[DataAcquisitionThread] = None
         self.depth_from_markers = depth_from_markers
         self.ir_low_exposure = ir_low_exposure
@@ -233,10 +234,12 @@ class Page3(QWidget):
             points_3d = extract_3d_points(charuco_corners, depth_frame)
 
             # Calculate the transformation matrix and its inverse to align with gravity
-            # align_transform_mtx = quaternion.as_rotation_matrix(np.quaternion(*self.Q))
-            # align_transform_inv_mtx = np.linalg.inv(align_transform_mtx)
-            align_transform_mtx = np.eye(3, dtype=np.float64)
-            align_transform_inv_mtx = np.eye(3, dtype=np.float64)
+            if self.motion_support:
+                align_transform_mtx = quaternion.as_rotation_matrix(np.quaternion(*self.Q))
+                align_transform_inv_mtx = np.linalg.inv(align_transform_mtx)
+            else:
+                align_transform_mtx = np.eye(3, dtype=np.float64)
+                align_transform_inv_mtx = np.eye(3, dtype=np.float64)
 
             # Align the 3D points with gravity
             points_3d_aligned = [align_transform_mtx @ point for point in points_3d]
@@ -528,22 +531,28 @@ class Page3(QWidget):
         color_frame = aligned_frames.get_color_frame()
         depth_frame = aligned_frames.get_depth_frame()
         ir_frame = aligned_frames.get_infrared_frame(0)
-        # accel_frame = frames.first_or_default(rs.stream.accel)
-        # gyro_frame = frames.first_or_default(rs.stream.gyro)
 
-        # if not color_frame or not ir_frame or not accel_frame or not gyro_frame:
-        if not color_frame or not ir_frame:
-            return
+        if self.motion_support:
+            accel_frame = frames.first_or_default(rs.stream.accel)
+            gyro_frame = frames.first_or_default(rs.stream.gyro)
+
+        if self.motion_support:
+            if not color_frame or not ir_frame or not accel_frame or not gyro_frame:
+                return
+        else:
+            if not color_frame or not ir_frame:
+                return
 
         self.latest_color_frame = color_frame
         self.latest_depth_frame = depth_frame
         self.latest_ir_frame = ir_frame
 
-        # accel_data = accel_frame.as_motion_frame().get_motion_data()
-        # gyro_data = gyro_frame.as_motion_frame().get_motion_data()
+        if self.motion_support:
+            accel_data = accel_frame.as_motion_frame().get_motion_data()
+            gyro_data = gyro_frame.as_motion_frame().get_motion_data()
 
-        # Update Madgwick filter
-        # self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.y, gyro_data.z], acc=[accel_data.x, accel_data.z, -accel_data.y])
+            # Update Madgwick filter
+            self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.y, gyro_data.z], acc=[accel_data.x, accel_data.z, -accel_data.y])
 
     def start_data_acquisition(self) -> None:
         if self.pipeline:
