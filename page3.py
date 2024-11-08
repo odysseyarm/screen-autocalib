@@ -200,7 +200,10 @@ class Page3(QWidget):
         self.latest_depth_frame = None
 
         depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
-        depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
+        if depth_sensor.is_option_read_only(rs.option.exposure):
+            print("Warning: Depth sensor exposure is read-only.")
+        else:
+            depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
         QTimer.singleShot(500, lambda: self._detect_charuco_corners_continued(color_frame, depth_frame))
 
     def _detect_charuco_corners_continued(self, color_frame, depth_frame):

@@ -42,8 +42,6 @@ class MainWindow(QMainWindow):
         else:
             self.init_pipeline()
 
-        self.showFullScreen()
-
     def init_pipeline(self) -> None:
         # Initialize the RealSense pipeline
         self.pipeline = rs.pipeline()
@@ -153,9 +151,11 @@ if __name__ == "__main__":
         args.display = 0
     screen = screens[args.display]
 
-    window = MainWindow(args)
+    w = MainWindow(args)
 
-    window.setGeometry(screen.availableGeometry())
-    window.showFullScreen()
-    window.windowHandle().setScreen(screen)
+    w.show()
+    w.setScreen(screen)
+    w.move(w.screen().geometry().topLeft())
+    w.showFullScreen()
+
     sys.exit(app.exec())
