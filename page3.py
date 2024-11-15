@@ -519,7 +519,7 @@ class Page3(QWidget):
 
         with io.open(screen_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps({
-                "homography": self.homography.flatten().tolist(),
+                "homography": self.homography.transpose().flatten().tolist(),
                 "object_points": self.object_points.tolist(),
             }))
         
