@@ -207,6 +207,8 @@ class Page3(QWidget):
         QTimer.singleShot(500, lambda: self._detect_charuco_corners_continued(color_frame, depth_frame))
 
     def _detect_charuco_corners_continued(self, color_frame, depth_frame):
+        Q = np.array(self.Q)
+
         markers_ir_frame = self.latest_ir_frame
         markers_depth_frame = self.latest_depth_frame
         if markers_ir_frame is None or markers_depth_frame is None:
@@ -238,7 +240,7 @@ class Page3(QWidget):
 
             # Calculate the transformation matrix and its inverse to align with gravity
             if self.motion_support:
-                align_transform_mtx = quaternion.as_rotation_matrix(np.quaternion(*self.Q))
+                align_transform_mtx = quaternion.as_rotation_matrix(np.quaternion(*Q))
                 align_transform_inv_mtx = np.linalg.inv(align_transform_mtx)
             else:
                 align_transform_mtx = np.eye(3, dtype=np.float64)
@@ -489,6 +491,9 @@ class Page3(QWidget):
             # set members for saving
             self.homography = np.linalg.inv(h_aligned)
             self.object_points = detected_marker_pattern_aligned_transformed
+            self.rotation = Q
+            # reorder from wxyz to xyzw
+            self.rotation = np.roll(self.rotation, -1)
 
             # Enable the "Done" button after showing the results
             self.next_button.setEnabled(True)
@@ -519,6 +524,7 @@ class Page3(QWidget):
 
         with io.open(screen_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps({
+                "rotation": self.rotation.tolist(),
                 "homography": self.homography.transpose().flatten().tolist(),
                 "object_points": self.object_points.tolist(),
             }))
