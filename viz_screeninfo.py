@@ -13,10 +13,12 @@ def main():
     with open(args.screen_info_path) as f:
         screen_info = json.load(f)
 
-    h = np.array(screen_info["homography"]).reshape(3, 3)
+    h = np.array(screen_info["homography"]).reshape(3, 3).transpose()
+    print("homography =")
+    print(h)
     h_inv = np.linalg.inv(h)
 
-    fig = pp.figure()
+    fig = pp.figure(args.screen_info_path)
     ax = fig.add_subplot(projection="3d")
 
     # draw object points
