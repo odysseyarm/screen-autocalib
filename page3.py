@@ -561,7 +561,7 @@ class Page3(QWidget):
             gyro_data = gyro_frame.as_motion_frame().get_motion_data()
 
             # Update Madgwick filter
-            self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.y, gyro_data.z], acc=[accel_data.x, accel_data.z, -accel_data.y])
+            self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.z, -gyro_data.y], acc=[accel_data.x, accel_data.z, -accel_data.y])
 
     def start_data_acquisition(self) -> None:
         if self.pipeline:
