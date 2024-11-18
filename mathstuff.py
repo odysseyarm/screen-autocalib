@@ -62,6 +62,8 @@ def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.floa
 
     x = np.cross(np.array([0, 1, 0]), z)
     y = np.cross(z, x)
+    x /= np.linalg.norm(x)
+    y /= np.linalg.norm(y)
 
     # Construct the rotation matrix (column-major)
     rotation_matrix = np.eye(4, dtype=np.float64)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys, argparse
+import quaternion
 
 def main():
     parser = argparse.ArgumentParser()
@@ -14,6 +15,11 @@ def main():
         screen_info = json.load(f)
 
     h = np.array(screen_info["homography"]).reshape(3, 3).transpose()
+    rotation_q = np.quaternion(*np.roll(screen_info["rotation"], 1))
+    down = quaternion.as_rotation_matrix(rotation_q) @ [0, 0.2, 0]
+    print("rotation =")
+    print(quaternion.as_rotation_matrix(rotation_q))
+    print()
     print("homography =")
     print(h)
     h_inv = np.linalg.inv(h)
@@ -35,6 +41,8 @@ def main():
         plot_normalized([[i, 0, 1], [i, 1, 1]], h_inv, ax)
         # horizontal line
         plot_normalized([[0, i, 1], [1, i, 1]], h_inv, ax)
+
+    ax.quiver([0], [0], [0], [down[0]], [down[2]], [down[1]])
 
     draw_board(h_inv, ax)
 

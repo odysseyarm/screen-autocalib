@@ -240,7 +240,12 @@ class Page3(QWidget):
 
             # Calculate the transformation matrix and its inverse to align with gravity
             if self.motion_support:
-                align_transform_mtx = quaternion.as_rotation_matrix(np.quaternion(*Q))
+                swap_yz = np.array([
+                    [1, 0, 0],
+                    [0, 0, 1],
+                    [0, -1, 0],
+                ])
+                align_transform_mtx = np.linalg.inv(swap_yz) @ quaternion.as_rotation_matrix(np.quaternion(*Q)) @ swap_yz
                 align_transform_inv_mtx = np.linalg.inv(align_transform_mtx)
             else:
                 align_transform_mtx = np.eye(3, dtype=np.float64)
@@ -491,8 +496,9 @@ class Page3(QWidget):
             # set members for saving
             self.homography = np.linalg.inv(h_aligned)
             self.object_points = detected_marker_pattern_aligned_transformed
-            # self.rotation = quaternion.as_float_array(np.roll(quaternion.from_rotation_matrix(xy_transformation_matrix_aligned), -1))
-            self.rotation = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+            self.rotation = np.roll(quaternion.as_float_array(quaternion.from_rotation_matrix(
+                xy_transformation_matrix_aligned[:3, :3]
+            )), -1)
 
             # Enable the "Done" button after showing the results
             self.next_button.setEnabled(True)
@@ -560,6 +566,7 @@ class Page3(QWidget):
             gyro_data = gyro_frame.as_motion_frame().get_motion_data()
 
             # Update Madgwick filter
+            # Swap coordinates because the Madgwick expects z to be gravity
             self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.z, -gyro_data.y], acc=[accel_data.x, accel_data.z, -accel_data.y])
 
     def start_data_acquisition(self) -> None:
