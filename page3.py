@@ -323,7 +323,7 @@ class Page3(QWidget):
             deprojected_points_aligned = [align_transform_mtx @ point for point in deprojected_points]
             deprojected_points_aligned = np.array(deprojected_points_aligned, dtype=np.float32)
 
-            # rotate plane to align with gravite
+            # rotate plane to align with gravity
             plane_aligned = (align_transform_mtx @ plane[0], align_transform_mtx @ plane[1])
 
             print(deprojected_points_aligned)
@@ -491,9 +491,8 @@ class Page3(QWidget):
             # set members for saving
             self.homography = np.linalg.inv(h_aligned)
             self.object_points = detected_marker_pattern_aligned_transformed
-            self.rotation = Q
-            # reorder from wxyz to xyzw
-            self.rotation = np.roll(self.rotation, -1)
+            # self.rotation = quaternion.as_float_array(np.roll(quaternion.from_rotation_matrix(xy_transformation_matrix_aligned), -1))
+            self.rotation = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
 
             # Enable the "Done" button after showing the results
             self.next_button.setEnabled(True)
