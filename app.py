@@ -89,6 +89,11 @@ class MainWindow(QMainWindow):
                 if color_sensor:
                     color_sensor.set_option(rs.option.enable_auto_exposure, 0)
                     color_sensor.set_option(rs.option.exposure, self.args.rgb_exposure)
+            
+            self.spatial_filter = rs.spatial_filter()
+            self.spatial_filter.set_option(rs.option.filter_magnitude, 2)
+            self.spatial_filter.set_option(rs.option.filter_smooth_alpha, .5)
+            self.spatial_filter.set_option(rs.option.filter_smooth_delta, 20)
 
             # Create and configure a temporal filter
             self.temporal_filter = rs.temporal_filter()
@@ -102,6 +107,7 @@ class MainWindow(QMainWindow):
             # Pass the pipeline and filter to Page3
             self.page3.pipeline = self.pipeline
             self.page3.pipeline_profile = self.pipeline_profile
+            self.page3.spatial_filter = self.spatial_filter
             self.page3.temporal_filter = self.temporal_filter
             self.page3.hole_filter = self.hole_filter
             self.page3.align = self.align

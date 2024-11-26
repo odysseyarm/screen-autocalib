@@ -47,6 +47,7 @@ class Page3(QWidget):
         self.motion_support = False
         self.pipeline = pipeline
         self.pipeline_profile = None
+        self.spatial_filter: Optional[rs.spatial_filter] = None  # Placeholder for the spatial filter
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
         self.hole_filter: Optional[rs.hole_filling_filter] = None  # Placeholder for the hole filling filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
@@ -64,6 +65,8 @@ class Page3(QWidget):
         self.depth_from_markers = depth_from_markers
         self.ir_low_exposure = ir_low_exposure
         self.init_ui()
+        self.cols = 14
+        self.rows = 9
 
     def init_ui(self) -> None:
         self.stacked_layout = QStackedLayout(self)
@@ -166,8 +169,8 @@ class Page3(QWidget):
 
     def create_charuco_board(self) -> None:
         # Create the ChArUco board
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-        board = cv2.aruco.CharucoBoard((11, 7), 0.04, 0.02, aruco_dict)
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+        board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.02, aruco_dict)
 
         window_width = self.main_window.width()
         window_height = self.main_window.height()
@@ -219,8 +222,8 @@ class Page3(QWidget):
         markers_ir_image = np.asanyarray(markers_ir_frame.get_data())
 
         # Detect ChArUco board corners
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-        board = cv2.aruco.CharucoBoard((11, 7), 0.04, 0.02, aruco_dict)
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+        board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.02, aruco_dict)
 
         # Initialize detector parameters
         detector_parameters = cv2.aruco.DetectorParameters()
@@ -257,12 +260,12 @@ class Page3(QWidget):
             intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
 
             # Define the expected positions of the ChArUco board corners
-            charuco_board_2d_points = define_charuco_board_2d_points((11, 7), 1)
+            charuco_board_2d_points = define_charuco_board_2d_points((self.cols, self.rows), 1)
 
             screen_width = self.main_window.width()
             screen_height = self.main_window.height()
 
-            board_aspect_ratio = 11 / 7
+            board_aspect_ratio = self.cols / self.rows
             screen_aspect_ratio = screen_width / screen_height
 
             board_width_in_pixels = screen_height * board_aspect_ratio
@@ -270,13 +273,13 @@ class Page3(QWidget):
 
             if screen_aspect_ratio < board_aspect_ratio:
                 scale_x = 0
-                scale_y = (screen_height - board_height_in_pixels) / (board_height_in_pixels / 7)
+                scale_y = (screen_height - board_height_in_pixels) / (board_height_in_pixels / self.rows)
             else:
-                scale_x = (screen_width - board_width_in_pixels) / (board_width_in_pixels / 11)
+                scale_x = (screen_width - board_width_in_pixels) / (board_width_in_pixels / self.cols)
                 scale_y = 0
 
             # Normalize the expected positions to the unit square
-            charuco_board_2d_points = {id_: [(1 + point[0] + scale_x / 2) / (11 + scale_x), (1 + point[1] + scale_y / 2) / (7 + scale_y)] for id_, point in charuco_board_2d_points.items()}
+            charuco_board_2d_points = {id_: [(1 + point[0] + scale_x / 2) / (self.cols + scale_x), (1 + point[1] + scale_y / 2) / (self.rows + scale_y)] for id_, point in charuco_board_2d_points.items()}
 
             # Filter expected points and detected points based on IDs
             expected_points = list[np.ndarray[Literal[2], np.dtype[np.float32]]]()
@@ -539,7 +542,8 @@ class Page3(QWidget):
         self.exit_application()
 
     def process_frame(self, frames: rs.frame) -> None:
-        # frames = self.temporal_filter.process(frames)
+        frames = self.spatial_filter.process(frames)
+        frames = self.temporal_filter.process(frames)
         frames = self.hole_filter.process(frames).as_frameset()
         aligned_frames = self.align.process(frames)
         color_frame = aligned_frames.get_color_frame()
