@@ -4,6 +4,9 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QMessag
 from page1 import Page1
 from page2 import Page2
 from page3 import Page3
+from page4 import Page4
+from page5 import Page5
+from calibration_data import CalibrationData
 import argparse
 from typing import Optional
 
@@ -18,9 +21,6 @@ class MainWindow(QMainWindow):
         if not args.dir:
             args.dir = None
 
-        if not args.depth_from_markers:
-            args.depth_from_markers = False
-
         super().__init__()
 
         self.stacked_widget = QStackedWidget()
@@ -28,12 +28,18 @@ class MainWindow(QMainWindow):
 
         self.pipeline: Optional[rs.pipeline] = None
 
+        self.calibration_data = CalibrationData()
+
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress)
-        self.page3 = Page3(self, self.exit_application, self.pipeline, args.screen, args.dir, args.auto_progress, args.depth_from_markers, args.ir_low_exposure)
+        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, self.calibration_data)
+        self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, self.calibration_data)
+        self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir)
 
         self.stacked_widget.addWidget(self.page2)
         self.stacked_widget.addWidget(self.page3)
+        self.stacked_widget.addWidget(self.page4)
+        self.stacked_widget.addWidget(self.page5)
 
         if self.bag_file is None:
             self.page1 = Page1(self, self.init_pipeline, self.exit_application)
@@ -66,9 +72,9 @@ class MainWindow(QMainWindow):
                         if sensor.is_motion_sensor():
                             motion_support = True
 
-                config.enable_stream(rs.stream.color, 848, 480, rs.format.bgr8, 30)
-                config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
-                config.enable_stream(rs.stream.infrared, 1, 848, 480, rs.format.y8, 30)
+                config.enable_stream(rs.stream.color, 1280, 800, rs.format.bgr8, 15)
+                config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 15)
+                config.enable_stream(rs.stream.infrared, 1, 848, 480, rs.format.y8, 15)
 
                 if motion_support:
                     config.enable_stream(rs.stream.accel)
@@ -113,6 +119,9 @@ class MainWindow(QMainWindow):
             self.page3.align = self.align
             self.page3.motion_support = motion_support
 
+            self.page4.pipeline = self.pipeline
+            self.page4.pipeline_profile = self.pipeline_profile
+
             # Pass the pipeline to Page2
             self.page2.pipeline = self.pipeline
 
@@ -122,13 +131,21 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", str(e))
             self.exit_application()
 
-    def goto_page3(self) -> None:
-        self.page3.start()
-        self.stacked_widget.setCurrentWidget(self.page3)
-
     def goto_page2(self) -> None:
         self.page2.start_steps()
         self.stacked_widget.setCurrentWidget(self.page2)
+
+    def goto_page3(self) -> None:
+        self.page3.start()
+        self.stacked_widget.setCurrentWidget(self.page3)
+    
+    def goto_page4(self) -> None:
+        self.page4.start()
+        self.stacked_widget.setCurrentWidget(self.page4)
+
+    def goto_page5(self) -> None:
+        self.page5.start(self.calibration_data)
+        self.stacked_widget.setCurrentWidget(self.page5)
 
     def exit_application(self) -> None:
         if hasattr(self, 'pipeline') and self.pipeline:
@@ -142,7 +159,6 @@ if __name__ == "__main__":
     parser.add_argument('--screen', type=int, default=0, help='Screen to save the calibration file for')
     parser.add_argument('--dir', type=str, help='Output directory for calibration file')
     parser.add_argument('--auto-progress', default=False, action="store_true", help='Enable auto-progress mode')
-    parser.add_argument('--depth-from-markers', default=False, action="store_true", help='Use depth from markers instead of from screen')
     parser.add_argument('--ir-high-exposure', default=1500, type=float, help='IR camera exposure to use when capturing the screen')
     parser.add_argument('--ir-low-exposure', default=100, type=float, help='IR camera exposure to use when capturing the markers')
     parser.add_argument('--rgb-exposure', default=1500, type=float, help='RGB camera exposure')
