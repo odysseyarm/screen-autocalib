@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Callable
+from typing import Callable, Optional
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
@@ -20,6 +20,7 @@ class Page5(QWidget):
         self.exit_application = exit_application
         self.results_layout = QVBoxLayout()
         self.done_countdown_time = 10
+        self.done_timer: Optional[QTimer] = None
         self.screen_id = screen_id
         self.output_dir = output_dir
         self.auto_progress = auto_progress
@@ -66,10 +67,10 @@ class Page5(QWidget):
             self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.done_countdown_time}")
 
         if self.done_countdown_time <= 0:
-            self.done_timer.stop()
             if success:
                 self.save_and_exit()
             else:
+                self.done_timer.stop()
                 self.exit_application()
     
     def start(self, calibration_data: CalibrationData) -> None:
@@ -140,6 +141,9 @@ class Page5(QWidget):
         )), -1)
 
     def save_and_exit(self) -> None:
+        if self.done_timer is not None:
+            self.done_timer.stop()
+
         if self.output_dir:
             _user_data_dir = Path(self.output_dir)
         else:

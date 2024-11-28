@@ -46,7 +46,7 @@ class Page2(QWidget):
         self.auto_progress = auto_progress
         self.pipeline: Optional[rs.pipeline] = None
         self.data_thread: Optional[DataAcquisitionThread] = None
-        self.countdown_timer = None
+        self.countdown_timer: Optional[QTimer] = None
         self.remaining_time = 30
         self.init_ui()
 
@@ -74,7 +74,7 @@ class Page2(QWidget):
 
         button_layout = QHBoxLayout()
         self.next_button = QPushButton("Next")
-        self.next_button.clicked.connect(self.next_page)
+        self.next_button.clicked.connect(self.go_next)
         button_layout.addWidget(self.next_button)
 
         self.exit_button = QPushButton("Exit")
@@ -124,8 +124,12 @@ class Page2(QWidget):
         self.remaining_time -= 1
         self.countdown_label.setText(str(self.remaining_time))
         if self.remaining_time <= 0:
+            self.go_next()
+    
+    def go_next(self) -> None:
+        if self.countdown_timer is not None:
             self.countdown_timer.stop()
-            self.next_page()
+        self.next_page()
 
     def resizeEvent(self, event: QEvent) -> None:
         super().resizeEvent(event)

@@ -53,6 +53,8 @@ class Page3(QWidget):
         self.auto_progress = auto_progress
         self.go_countdown_time = 3
         self.next_countdown_time = 5
+        self.next_timer: Optional[QTimer] = None
+        self.countdown_timer: Optional[QTimer] = None
         self.latest_color_frame: Optional[rs.frame] = None
         self.latest_depth_frame: Optional[rs.frame] = None
         self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
@@ -82,7 +84,7 @@ class Page3(QWidget):
 
         self.next_button = QPushButton("Next")
         self.next_button.setEnabled(False)
-        self.next_button.clicked.connect(self.next_page)
+        self.next_button.clicked.connect(self.go_next)
         self.initial_layout.addWidget(self.next_button)
 
         self.exit_button = QPushButton("Exit")
@@ -138,11 +140,17 @@ class Page3(QWidget):
             self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.next_countdown_time}")
 
         if self.next_countdown_time <= 0:
-            self.next_timer.stop()
             if success:
-                self.next_page()
+                self.go_next()
             else:
+                if self.next_timer is not None:
+                    self.next_timer.stop()
                 self.exit_application()
+    
+    def go_next(self) -> None:
+        if self.next_timer is not None:
+            self.next_timer.stop()
+        self.next_page()
 
     def resizeEvent(self, event: Any) -> None:
         self.create_charuco_board()

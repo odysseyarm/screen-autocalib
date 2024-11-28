@@ -20,6 +20,7 @@ class Page4(QWidget):
         self.pipeline = pipeline
         self.pipeline_profile = None
         self.auto_progress = auto_progress
+        self.countdown_timer: Optional[QTimer] = None
         self.done_countdown_time = 10
         self.latest_ir_frame: Optional[rs.frame] = None
         self.data_thread: Optional[DataAcquisitionThread] = None
@@ -87,6 +88,8 @@ class Page4(QWidget):
             self.exit_application()
 
     def next(self) -> None:
+        if self.countdown_timer is not None:
+            self.countdown_timer.stop()
         if self.latest_ir_frame is None:
             self.fail("No frames for marker detection")
         elif not self.detect_markers(self.latest_ir_frame):
@@ -183,7 +186,6 @@ class Page4(QWidget):
         self.remaining_time -= 1
         self.countdown_label.setText(str(self.remaining_time))
         if self.remaining_time <= 0:
-            self.countdown_timer.stop()
             self.next()
 
     def resizeEvent(self, event: QEvent) -> None:
