@@ -11,6 +11,7 @@ from platformdirs import user_data_dir
 import io
 import json
 import time
+import quaternion
 from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
 from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern
