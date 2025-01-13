@@ -2,9 +2,10 @@ pyrealsense2
 numpy<2
 numpy-quaternion
 PySide6
-matplotlib
+matplotlib==3.9
 scikit-learn
 ahrs
 opencv-python
 platformdirs
 scikit-spatial
+pyinstaller==6.11
