@@ -172,6 +172,7 @@ def marker_pattern():
         np.array([0.5, 0.]),
         np.array([0.5, 1.]),
         np.array([0.8, 1.]),
+        np.array([0.5, 0.5]),
     ]
 
     return np.array(points)
