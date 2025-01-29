@@ -1,0 +1,19 @@
+[project]
+name = "screen-autocalib"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ahrs>=0.3.1",
+    "matplotlib==3.9",
+    "numpy<2",
+    "numpy-quaternion>=2024.0.3",
+    "opencv-python>=4.11.0.86",
+    "platformdirs>=4.3.6",
+    "pyinstaller==6.11",
+    "pyrealsense2>=2.55.1.6486",
+    "pyside6>=6.8.1.1",
+    "scikit-learn>=1.6.1",
+    "scikit-spatial>=8.1.0",
+]
