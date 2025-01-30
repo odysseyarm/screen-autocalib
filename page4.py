@@ -121,7 +121,7 @@ class Page4(QWidget):
         normalized_marker_pattern = mathstuff.marker_pattern()
         transformed_marker_pattern_3d_aligned = cv2.perspectiveTransform(normalized_marker_pattern.reshape(-1, 1, 2), self.calibration_data.h_aligned).reshape(-1, 2)
         transformed_marker_pattern_3d_aligned = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_marker_pattern_3d_aligned)
-        transformed_marker_pattern_3d_aligned = np.hstack([transformed_marker_pattern_3d_aligned, np.zeros((6, 1), dtype=np.float32)])
+        transformed_marker_pattern_3d_aligned = np.hstack([transformed_marker_pattern_3d_aligned, np.zeros((len(normalized_marker_pattern), 1), dtype=np.float32)])
         expected_marker_pattern_aligned = mathstuff.apply_transformation(transformed_marker_pattern_3d_aligned, np.linalg.inv(self.calibration_data.xy_transformation_matrix_aligned))
 
         if len(detected_markers_2d) < len(expected_marker_pattern_aligned):
