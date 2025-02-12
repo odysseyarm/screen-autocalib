@@ -21,12 +21,10 @@ class Page4(QWidget):
         self.pipeline_profile = None
         self.auto_progress = auto_progress
         self.countdown_timer: Optional[QTimer] = None
-        self.done_countdown_time = 10
         self.latest_ir_frame: Optional[rs.frame] = None
         self.data_thread: Optional[DataAcquisitionThread] = None
         self.ir_low_exposure = ir_low_exposure
         self.remaining_time = 30
-        self.fail_countdown_time = 5
         self.next_page = next_page
         self.calibration_data = calibration_data
         self.init_ui()
@@ -72,28 +70,19 @@ class Page4(QWidget):
 
         self.setLayout(layout)
 
-    def start_fail_countdown(self) -> None:
-        """Start the countdown after 'Autocalibration unsuccessful'."""
-        self.fail_timer = QTimer(self)
-        self.fail_timer.timeout.connect(self.update_fail_countdown)
-        self.fail_timer.start(1000)
-
-    def update_fail_countdown(self) -> None:
-        """Update the fail countdown."""
-        self.fail_countdown_time -= 1
-        self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.fail_countdown_time}")
-
-        if self.fail_countdown_time <= 0:
-            self.fail_timer.stop()
-            self.exit_application()
-
     def next(self) -> None:
         if self.countdown_timer is not None:
             self.countdown_timer.stop()
         if self.latest_ir_frame is None:
             self.fail("No frames for marker detection")
+            self.remaining_time = 30
+            if self.countdown_timer is not None:
+                self.countdown_timer.start(1000)
         elif not self.detect_markers(self.latest_ir_frame):
             self.fail("Marker detection failed")
+            self.remaining_time = 30
+            if self.countdown_timer is not None:
+                self.countdown_timer.start(1000)
         else:
             self.next_page()
 
@@ -156,10 +145,7 @@ class Page4(QWidget):
 
     def fail(self, msg: str) -> None:
         print(f"Failure: {msg}")
-        self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.fail_countdown_time}")
-        if self.auto_progress:
-            self.start_fail_countdown()
-        self.stacked_layout.setCurrentWidget(self.initial_widget)
+        self.instructions_label.setText(f"{msg}")
 
     def start(self) -> None:
         depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()

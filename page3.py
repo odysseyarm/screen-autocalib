@@ -61,7 +61,7 @@ class Page3(QWidget):
         self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
         self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
         self.data_thread: Optional[DataAcquisitionThread] = None
-        self.cols = 14
+        self.cols = 16
         self.rows = 9
         self.next_page = next_page
         self.calibration_data = calibration_data
@@ -163,7 +163,7 @@ class Page3(QWidget):
     def create_charuco_board(self) -> None:
         # Create the ChArUco board
         aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-        board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.02, aruco_dict)
+        board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.03, aruco_dict)
 
         window_width = self.main_window.width()
         window_height = self.main_window.height()
@@ -203,7 +203,7 @@ class Page3(QWidget):
 
         # Detect ChArUco board corners
         aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-        board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.02, aruco_dict)
+        board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.03, aruco_dict)
 
         # Initialize detector parameters
         detector_parameters = cv2.aruco.DetectorParameters()

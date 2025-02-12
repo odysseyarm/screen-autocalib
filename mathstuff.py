@@ -28,25 +28,28 @@ def plane_from_points(points: npt.NDArray[np.float32], min_samples: int) -> Opti
         print(f"Only got {len(points)} points")
         return None
 
-    # Fit RANSAC regressor with PlaneModel
-    ransac = RANSACRegressor(
-        PlaneModel(), 
-        min_samples=min_samples,  # Minimum number of samples to define a plane
-        residual_threshold=0.01, 
-        max_trials=10000
-    )
-    ransac.fit(X, y)
+    try:
+        # Fit RANSAC regressor with PlaneModel
+        ransac = RANSACRegressor(
+            PlaneModel(), 
+            min_samples=min_samples,  # Minimum number of samples to define a plane
+            residual_threshold=0.01, 
+            max_trials=10000
+        )
+        ransac.fit(X, y)
 
-    # Extract inlier points
-    inlier_mask = ransac.inlier_mask_ # type: ignore
-    inliers = points[inlier_mask]
+        # Extract inlier points
+        inlier_mask = ransac.inlier_mask_ # type: ignore
+        inliers = points[inlier_mask]
 
-    # Use skspatial to find the best fitting plane for the inliers
-    plane = Plane.best_fit(inliers)
+        # Use skspatial to find the best fitting plane for the inliers
+        plane = Plane.best_fit(inliers)
 
-    # Extract centroid and normal from the fitted plane
-    centroid = plane.point
-    normal = plane.normal
+        # Extract centroid and normal from the fitted plane
+        centroid = plane.point
+        normal = plane.normal
+    except Exception as _:
+        return None
 
     return centroid, normal
 
