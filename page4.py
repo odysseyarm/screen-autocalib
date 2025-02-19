@@ -99,7 +99,7 @@ class Page4(QWidget):
 
         detected_markers_2d = []
         for cnt in contours:
-            if cv2.contourArea(cnt) > 20:  # Filter small contours
+            if cv2.contourArea(cnt) > 10:  # Filter small contours
                 M = cv2.moments(cnt)
                 if M['m00'] != 0:
                     cx = int(M['m10'] / M['m00'])
