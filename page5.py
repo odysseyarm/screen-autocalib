@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Callable, Optional
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QScreen
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 import cv2
 import quaternion
@@ -14,9 +14,9 @@ import json
 import time
 
 class Page5(QWidget):
-    def __init__(self, parent: QWidget, exit_application: Callable[[], None], auto_progress: bool, screen_id: int, output_dir: str) -> None:
+    def __init__(self, parent: QWidget, exit_application: Callable[[], None], auto_progress: bool, screen_id: int, output_dir: str, screen: QScreen) -> None:
         super().__init__(parent)
-        self.main_window = parent
+        self.screen_size = screen.size()
         self.exit_application = exit_application
         self.results_layout = QVBoxLayout()
         self.done_countdown_time = 10
@@ -92,7 +92,7 @@ class Page5(QWidget):
         bytes_per_line = width * 3
         qt_image = QImage(calibration_data.color_image.data, width, height, bytes_per_line, QImage.Format.Format_BGR888)
         pixmap = QPixmap.fromImage(qt_image)
-        scaled_pixmap = pixmap.scaled(self.main_window.size() / 3, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        scaled_pixmap = pixmap.scaled(self.screen_size / 3, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.rgb_label.setPixmap(scaled_pixmap)
 
         # Show Matplotlib 3D plot of detected best quad corners
@@ -127,7 +127,7 @@ class Page5(QWidget):
         matplotlib_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
         qt_image = QImage(matplotlib_image.data, width, height, QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(qt_image)
-        scaled_pixmap = pixmap.scaled(self.main_window.size() / 3, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        scaled_pixmap = pixmap.scaled(self.screen_size / 3, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.matplotlib_label.setPixmap(scaled_pixmap)
 
         plt.close(fig)

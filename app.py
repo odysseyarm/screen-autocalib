@@ -1,6 +1,7 @@
 import sys
 import pyrealsense2 as rs
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QMessageBox
+from PySide6.QtGui import QScreen
 from page1 import Page1
 from page2 import Page2
 from page3 import Page3
@@ -11,7 +12,7 @@ import argparse
 from typing import Optional
 
 class MainWindow(QMainWindow):
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(self, args: argparse.Namespace, screen: QScreen) -> None:
         self.args = args
         if args.bag:
             self.bag_file = args.bag
@@ -32,9 +33,9 @@ class MainWindow(QMainWindow):
 
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress)
-        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, self.calibration_data)
+        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, self.calibration_data, screen)
         self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, self.calibration_data)
-        self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir)
+        self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir, screen)
 
         self.stacked_widget.addWidget(self.page2)
         self.stacked_widget.addWidget(self.page3)
@@ -173,7 +174,7 @@ if __name__ == "__main__":
         args.display = 0
     screen = screens[args.display]
 
-    w = MainWindow(args)
+    w = MainWindow(args, screen)
 
     w.show()
     w.setScreen(screen)

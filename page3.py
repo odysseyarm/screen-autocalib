@@ -5,7 +5,7 @@ import pyrealsense2 as rs
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
 import matplotlib.pyplot as plt
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QScreen
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
 from platformdirs import user_data_dir
 import io
@@ -16,6 +16,7 @@ from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
 from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern
 from calibration_data import CalibrationData
+from PySide6.QtGui import QGuiApplication
 
 def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]:
     points = dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]()
@@ -40,9 +41,9 @@ def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_fra
     return points_3d
 
 class Page3(QWidget):
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], auto_progress: bool, calibration_data: CalibrationData) -> None:
+    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], auto_progress: bool, calibration_data: CalibrationData, screen: QScreen) -> None:
         super().__init__(parent)
-        self.main_window = parent
+        self.screen_size = screen.size()
         self.exit_application = exit_application
         self.motion_support = False
         self.pipeline = pipeline
@@ -101,7 +102,7 @@ class Page3(QWidget):
         self.charuco_widget.setLayout(self.charuco_layout)
 
         self.label = QLabel()
-        self.charuco_layout.addWidget(self.label)
+        # self.charuco_layout.addWidget(self.label)
 
         self.stacked_layout.addWidget(self.charuco_widget)
 
@@ -158,6 +159,7 @@ class Page3(QWidget):
 
     def on_go_clicked(self) -> None:
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
+        self.label.showFullScreen()
         QTimer.singleShot(3000, self.detect_charuco_corners)  # type: ignore
 
     def create_charuco_board(self) -> None:
@@ -165,11 +167,8 @@ class Page3(QWidget):
         aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
         board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.03, aruco_dict)
 
-        window_width = self.main_window.width()
-        window_height = self.main_window.height()
-
         # Generate the ChArUco board image
-        board_image = board.generateImage((window_width, window_height), marginSize=0, borderBits=1)
+        board_image = board.generateImage(self.screen_size.toTuple(), marginSize=0, borderBits=1)
 
         height, width = board_image.shape[:2]
         bytes_per_line = width
@@ -183,6 +182,7 @@ class Page3(QWidget):
         self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.next_countdown_time}")
         if self.auto_progress:
             self.start_next_countdown(success=False)
+        self.label.hide()
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
     def detect_charuco_corners(self) -> None:
@@ -244,8 +244,8 @@ class Page3(QWidget):
             # Define the expected positions of the ChArUco board corners
             charuco_board_2d_points = define_charuco_board_2d_points((self.cols, self.rows), 1)
 
-            screen_width = self.main_window.width()
-            screen_height = self.main_window.height()
+            screen_width = self.screen_size.width()
+            screen_height = self.screen_size.height()
 
             board_aspect_ratio = self.cols / self.rows
             screen_aspect_ratio = screen_width / screen_height
@@ -375,6 +375,7 @@ class Page3(QWidget):
         if self.auto_progress:
             self.start_next_countdown(success=True)
 
+        self.label.hide()
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
     def process_frame(self, frames: rs.frame) -> None:
