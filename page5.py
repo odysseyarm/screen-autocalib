@@ -33,6 +33,10 @@ class Page5(QWidget):
         self.instructions_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.results_layout.addWidget(self.instructions_label)
 
+        self.plane_error_label = QLabel("Plane fit error: ?")
+        self.plane_error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.results_layout.addWidget(self.plane_error_label)
+
         self.matplotlib_label = QLabel()
         self.matplotlib_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.results_layout.addWidget(self.matplotlib_label)
@@ -72,7 +76,7 @@ class Page5(QWidget):
             else:
                 self.done_timer.stop()
                 self.exit_application()
-    
+
     def start(self, calibration_data: CalibrationData) -> None:
         self.draw_plots(calibration_data)
         if self.auto_progress:
@@ -86,6 +90,11 @@ class Page5(QWidget):
         for i,point in enumerate(calibration_data.detected_marker_pattern_2d):
             cv2.circle(calibration_data.color_image, tuple(point), 5, (255, 0, 255), -1)
             cv2.putText(calibration_data.color_image, str(i), tuple(point), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+        self.plane_error_label.setText(
+            f"Plane fit RMSE: {calibration_data.plane_rmse*1000} mm\n"
+            f"Plane fit max error: {calibration_data.plane_max_error*1000} mm"
+        )
 
         # Show RGB image with detected parts
         height, width = calibration_data.color_image.shape[:2]

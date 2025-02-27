@@ -19,7 +19,7 @@ class PlaneModel(BaseEstimator, RegressorMixin):
         d = -self.point_.dot(self.normal_)
         return (-self.normal_[0] * X[:, 0] - self.normal_[1] * X[:, 1] - d) / self.normal_[2] # type: ignore
 
-def plane_from_points(points: npt.NDArray[np.float32], min_samples: int) -> Optional[Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]]:
+def plane_from_points(points: npt.NDArray[np.float32], min_samples: int) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]], float, float]:
     # Prepare data for RANSAC
     X = points[:, :2]  # X and Y coordinates
     y = points[:, 2]   # Z coordinate
@@ -27,6 +27,7 @@ def plane_from_points(points: npt.NDArray[np.float32], min_samples: int) -> Opti
     if len(points) < min_samples:
         print(f"Only got {len(points)} points")
         return None
+    print(f"Fitting plane to {len(points)} points")
 
     try:
         # Fit RANSAC regressor with PlaneModel
@@ -41,17 +42,24 @@ def plane_from_points(points: npt.NDArray[np.float32], min_samples: int) -> Opti
         # Extract inlier points
         inlier_mask = ransac.inlier_mask_ # type: ignore
         inliers = points[inlier_mask]
+        print(f"Ignoring {len(points) - len(inliers)} outliers ({100 * (len(points) - len(inliers)) / len(points):.2f}%)")
 
         # Use skspatial to find the best fitting plane for the inliers
-        plane = Plane.best_fit(inliers)
+        plane = Plane.best_fit(inliers)  # type: Plane  # type: ignore
+        dists = plane.distance_points(inliers)
+        rmse = np.sqrt(np.mean(dists**2))
+        max_error = np.max(dists)
+        print(f"Plane fit RMSE: {rmse}")
+        print(f"Max error: {max_error}")
+        print(f"Min error: {np.min(dists)}")
 
         # Extract centroid and normal from the fitted plane
         centroid = plane.point
         normal = plane.normal
     except Exception as _:
-        return None
+        return None, -1.0, -1.0
 
-    return centroid, normal
+    return (centroid, normal), rmse, max_error
 
 def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.float32], np.ndarray[Literal[3], np.float32]]) -> np.ndarray[Literal[4, 4], np.float64]:
     point, normal = plane

@@ -302,7 +302,11 @@ class Page3(QWidget):
             detected_points = np.array(detected_points, dtype=np.float32)
 
             # Fit a plane using the custom plane fitting function
-            self.calibration_data.plane = plane_from_points(detected_points, 15)
+            (
+                self.calibration_data.plane,
+                self.calibration_data.plane_rmse,
+                self.calibration_data.plane_max_error,
+            )= plane_from_points(detected_points, 15)
             if self.calibration_data.plane is None:
                 self.fail("Plane fitting failed")
                 return
@@ -319,7 +323,6 @@ class Page3(QWidget):
             # rotate plane to align with gravity
             plane_aligned = (self.calibration_data.align_transform_mtx @ self.calibration_data.plane[0], self.calibration_data.align_transform_mtx @ self.calibration_data.plane[1])
 
-            print(deprojected_points_aligned)
             # Ensure deprojected_points are distinct
             if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
                 self.fail("Deprojected points are not distinct.")
@@ -328,14 +331,14 @@ class Page3(QWidget):
             # Find transformation matrix that aligns the plane with the XY plane
             self.calibration_data.xy_transformation_matrix_aligned = compute_xy_transformation_matrix(plane_aligned)
 
-            print("Deprojected points (aligned): ", deprojected_points_aligned)
+            # print("Deprojected points (aligned): ", deprojected_points_aligned)
 
             print("Transformation matrix (aligned): ", self.calibration_data.xy_transformation_matrix_aligned)
 
             # Apply the transformation to the detected points
             transformed_points = apply_transformation(deprojected_points_aligned, self.calibration_data.xy_transformation_matrix_aligned)
 
-            print("Transformed points: ", transformed_points)
+            # print("Transformed points: ", transformed_points)
 
             # Map the unit square corners to the plane's coordinate system using homography
             self.calibration_data.h_aligned, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
