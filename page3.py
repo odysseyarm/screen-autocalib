@@ -27,6 +27,33 @@ def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: f
             id += 1
     return points
 
+def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame, raw_color_frame, depth_sensor):
+    # Adapted from https://github.com/IntelRealSense/librealsense/issues/5603#issuecomment-574019008
+    depth_scale = depth_sensor.get_depth_scale()
+    # idk what values make sense
+    depth_min = 0.11 #meter
+    depth_max = 8.0 #meter
+
+    depth_vsp = rs.video_stream_profile(depth_frame.profile)
+    color_vsp = rs.video_stream_profile(raw_color_frame.profile)
+    depth_intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
+    color_intrin = rs.video_stream_profile(raw_color_frame.profile).get_intrinsics()
+
+    depth_to_color_extrin =  depth_vsp.get_extrinsics_to(raw_color_frame.profile)
+    color_to_depth_extrin =  color_vsp.get_extrinsics_to(depth_frame.profile)
+
+    aligned_corners = charuco_corners.copy()
+    for i, color_point in enumerate(charuco_corners):
+       aligned_corners[i] = rs.rs2_project_color_pixel_to_depth_pixel(
+                    depth_frame.get_data(), depth_scale,
+                    depth_min, depth_max,
+                    depth_intrin, color_intrin, color_to_depth_extrin, depth_to_color_extrin, color_point.ravel())
+    # depth_scale = depth_sensor.get_depth_scale()
+    # depth_intrin = depth_frame.profile.as_video_stream_profile().intrinsics
+    # color_intrin = raw_color_frame.profile.as_video_stream_profile().intrinsics
+    # depth_to_color_extrin = depth_frame.profile.get_extrinsics_to(raw_color_frame.profile)
+    return aligned_corners
+
 def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_frame: rs.depth_frame) -> List[np.ndarray[Literal[3], np.dtype[np.float32]]]:
     depth_intrinsics = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
     points_3d = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
@@ -57,6 +84,7 @@ class Page3(QWidget):
         self.next_countdown_time = 5
         self.next_timer: Optional[QTimer] = None
         self.countdown_timer: Optional[QTimer] = None
+        self.latest_raw_color_frame: Optional[rs.frame] = None
         self.latest_color_frame: Optional[rs.frame] = None
         self.latest_depth_frame: Optional[rs.frame] = None
         self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
@@ -190,15 +218,14 @@ class Page3(QWidget):
             self.fail("No frames available for ChArUco board detection.")
             return
 
+        raw_color_frame = self.latest_raw_color_frame
         color_frame = self.latest_color_frame
         depth_frame = self.latest_depth_frame
-        self.latest_depth_frame = None
+        depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
 
-        QTimer.singleShot(500, lambda: self._detect_charuco_corners_continued(color_frame, depth_frame))
-
-    def _detect_charuco_corners_continued(self, color_frame, depth_frame):
         Q = np.array(self.Q)
 
+        raw_color_image = np.asanyarray(raw_color_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
 
         # Detect ChArUco board corners
@@ -210,9 +237,10 @@ class Page3(QWidget):
         charuco_parameters = cv2.aruco.CharucoParameters()
         charuco_detector = cv2.aruco.CharucoDetector(board, charuco_parameters, detector_parameters)
 
-        gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(raw_color_image, cv2.COLOR_BGR2GRAY)
 
         charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
+        charuco_corners = align_corners_to_depth(charuco_corners, depth_frame, raw_color_frame, depth_sensor)
         charuco_ids = cast(Optional["cv2.typing.MatLike"], charuco_ids)  # OpenCV typings are missing "| None" in several places
 
         if charuco_ids is not None:
@@ -397,6 +425,7 @@ class Page3(QWidget):
             if not color_frame:
                 return
 
+        self.latest_raw_color_frame = frames.get_color_frame()
         self.latest_color_frame = color_frame
         self.latest_depth_frame = depth_frame
 

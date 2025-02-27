@@ -166,7 +166,7 @@ if __name__ == "__main__":
     parser.add_argument('--laser-power', default=150, type=float, help='Laser dot grid projector power (0-360)')
     args = parser.parse_args()
 
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv[:1])
 
     screens = QApplication.screens()
     if args.display < 0 or args.display >= len(screens):
