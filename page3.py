@@ -77,7 +77,6 @@ class Page3(QWidget):
         self.pipeline_profile = None
         self.spatial_filter: Optional[rs.spatial_filter] = None  # Placeholder for the spatial filter
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
-        self.hole_filter: Optional[rs.hole_filling_filter] = None  # Placeholder for the hole filling filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
         self.auto_progress = auto_progress
         self.go_countdown_time = 3
@@ -408,8 +407,7 @@ class Page3(QWidget):
 
     def process_frame(self, frames: rs.frame) -> None:
         frames = self.spatial_filter.process(frames)
-        frames = self.temporal_filter.process(frames)
-        frames = self.hole_filter.process(frames).as_frameset()
+        frames = self.temporal_filter.process(frames).as_frameset()
         aligned_frames = self.align.process(frames)
         color_frame = aligned_frames.get_color_frame()
         depth_frame = aligned_frames.get_depth_frame()

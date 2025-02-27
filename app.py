@@ -107,8 +107,6 @@ class MainWindow(QMainWindow):
             self.temporal_filter.set_option(rs.option.filter_smooth_alpha, .05)
             self.temporal_filter.set_option(rs.option.filter_smooth_delta, 20)
 
-            self.hole_filter = rs.hole_filling_filter()
-            self.hole_filter.set_option(rs.option.holes_fill, 2)
             self.align = rs.align(rs.stream.depth)
 
             # Pass the pipeline and filter to Page3
@@ -116,7 +114,6 @@ class MainWindow(QMainWindow):
             self.page3.pipeline_profile = self.pipeline_profile
             self.page3.spatial_filter = self.spatial_filter
             self.page3.temporal_filter = self.temporal_filter
-            self.page3.hole_filter = self.hole_filter
             self.page3.align = self.align
             self.page3.motion_support = motion_support
 
