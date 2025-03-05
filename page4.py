@@ -116,14 +116,18 @@ class Page4(QWidget):
         if len(detected_markers_2d) < len(expected_marker_pattern_aligned):
             print("Number of detected IR blobs is less than expected.")
             return False
-        
+
+        print(f"Detected {len(detected_markers_2d)} IR blobs, now approximating 3D positions...")
+
         detected_markers_3d = []
         for point in detected_markers_2d:
+            print(f"Approximating 3D position for IR blob at {point}")
             point_3d = mathstuff.approximate_intersection(self.calibration_data.plane, self.calibration_data.intrin, point[0], point[1], 0, 1000)
             detected_markers_3d.append(point_3d)
         
         detected_markers_3d_aligned = [self.calibration_data.align_transform_mtx @ point for point in detected_markers_3d]
 
+        print("Finding closest detected blobs to expected positions...")
         # Find the closest detected blobs to the expected positions
         detected_marker_pattern_aligned = []
         detected_marker_pattern_2d = []

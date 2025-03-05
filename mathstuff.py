@@ -6,10 +6,7 @@ from typing import Any, List, Literal, Optional, Tuple, cast, TypeVar
 import open3d as o3d
 
 T = TypeVar('T', np.float32, np.float64)
-def plane_from_points(points: npt.NDArray[T], min_samples: int, distance_threshold: float = 0.1, ransac_n: int = 30, num_iterations: int = 1000) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[T]], np.ndarray[Literal[3], np.dtype[T]]]], float, float]:
-    if len(points) < min_samples:
-        print(f"Only got {len(points)} points")
-        return None, -1.0, -1.0
+def plane_from_points(points: npt.NDArray[T], distance_threshold: float = 0.1, ransac_n: int = 30, num_iterations: int = 1000) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[T]], np.ndarray[Literal[3], np.dtype[T]]]], float, float]:
     print(f"Fitting plane to {len(points)} points")
 
     pcd = o3d.geometry.PointCloud()
@@ -17,6 +14,10 @@ def plane_from_points(points: npt.NDArray[T], min_samples: int, distance_thresho
 
     pcd = pcd.remove_non_finite_points()
     pcd = pcd.remove_duplicated_points()
+
+    if len(points) < ransac_n:
+        print(f"Only got {len(points)} points")
+        return None, -1.0, -1.0
 
     print("Running Open3D's segment_plane on the selected region...")
     plane_model: np.ndarray[Literal[4], np.dtype[np.float64]]
@@ -131,8 +132,9 @@ def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.flo
     max_eval = evaluate_plane(plane, max_point)
     
     if min_eval * max_eval > 0:
+        print("Plane evaluation at min and max points have the same sign")
         return np.array([0, 0, 0])
-    
+
     while max_z - min_z > epsilon:
         mid_z = (min_z + max_z) / 2
         mid_point = deproject(x, y, mid_z)

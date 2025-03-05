@@ -78,11 +78,13 @@ class Page5(QWidget):
                 self.exit_application()
 
     def start(self, calibration_data: CalibrationData) -> None:
+        print("Drawing plots...")
         self.draw_plots(calibration_data)
         if self.auto_progress:
             self.start_done_countdown(True)
 
     def draw_plots(self, calibration_data: CalibrationData) -> None:
+        print("Drawing best quad and detected marker pattern...")
         # Draw the best quad on the image
         cv2.polylines(calibration_data.color_image, [calibration_data.best_quad_2d], isClosed=True, color=(0, 255, 0), thickness=2)
 
@@ -96,6 +98,7 @@ class Page5(QWidget):
             f"Plane fit max error: {calibration_data.plane_max_error*1000} mm"
         )
 
+        print("Showing RGB image with detected parts and 3D plot...")
         # Show RGB image with detected parts
         height, width = calibration_data.color_image.shape[:2]
         bytes_per_line = width * 3
@@ -104,6 +107,7 @@ class Page5(QWidget):
         scaled_pixmap = pixmap.scaled(self.screen_size / 3, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.rgb_label.setPixmap(scaled_pixmap)
 
+        print("Showing 3D plot...")
         # Show Matplotlib 3D plot of detected best quad corners
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -118,8 +122,12 @@ class Page5(QWidget):
                     [calibration_data.best_quad_aligned[i][1], calibration_data.best_quad_aligned[(i + 1) % 4][1]], 'g')  # Swap Y and Z
 
         # Now also draw the detected chessboard corner 3d points in the plot
-        for point in calibration_data.points_3d_aligned:
-            ax.scatter(point[0], point[2], point[1], c='b', marker='x', s=0.5)  # Swap Y and Z
+        # for point in calibration_data.points_3d_aligned:
+        #     ax.scatter(point[0], point[2], point[1], c='b', marker='x', s=0.5)  # Swap Y and Z
+        # display every 1000th point
+        for i, point in enumerate(calibration_data.points_3d_aligned):
+            if i % 1000 == 0:
+                ax.scatter(point[0], point[2], point[1], c='b', marker='x', s=0.5)
 
         for point in calibration_data.detected_marker_pattern_aligned:
             ax.scatter(point[0], point[2], point[1], c='violet', marker='o', s=10)  # Swap Y and Z
@@ -131,6 +139,7 @@ class Page5(QWidget):
         ax.invert_zaxis() # Actually inverting y axis
         ax.set_aspect('equal')
 
+        print("Drawing 3D plot to image...")
         fig.canvas.draw()
         width, height = fig.canvas.get_width_height()
         matplotlib_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(height, width, 3)
