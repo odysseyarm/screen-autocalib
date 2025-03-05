@@ -88,32 +88,37 @@ class MainWindow(QMainWindow):
                 # Set fixed exposure and disable auto exposure for depth stream
                 depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
                 if depth_sensor:
+                    depth_sensor.set_option(rs.option.depth_units, 0.0001)
                     depth_sensor.set_option(rs.option.enable_auto_exposure, 0)
-                    depth_sensor.set_option(rs.option.exposure, self.args.ir_high_exposure)
+                    depth_sensor.set_option(rs.option.hdr_enabled, 1)
                     depth_sensor.set_option(rs.option.laser_power, self.args.laser_power)
 
                 color_sensor = self.pipeline_profile.get_device().first_color_sensor()
                 if color_sensor:
                     color_sensor.set_option(rs.option.enable_auto_exposure, 0)
                     color_sensor.set_option(rs.option.exposure, self.args.rgb_exposure)
-            
-            self.spatial_filter = rs.spatial_filter()
-            self.spatial_filter.set_option(rs.option.filter_magnitude, 2)
-            self.spatial_filter.set_option(rs.option.filter_smooth_alpha, .5)
-            self.spatial_filter.set_option(rs.option.filter_smooth_delta, 20)
 
+
+            self.hdr_merge = rs.hdr_merge()
+            
             # Create and configure a temporal filter
             self.temporal_filter = rs.temporal_filter()
             self.temporal_filter.set_option(rs.option.filter_smooth_alpha, .05)
             self.temporal_filter.set_option(rs.option.filter_smooth_delta, 20)
+
+            self.spatial_filter = rs.spatial_filter()
+            self.spatial_filter.set_option(rs.option.filter_magnitude, 2)
+            self.spatial_filter.set_option(rs.option.filter_smooth_alpha, .5)
+            self.spatial_filter.set_option(rs.option.filter_smooth_delta, 20)
 
             self.align = rs.align(rs.stream.depth)
 
             # Pass the pipeline and filter to Page3
             self.page3.pipeline = self.pipeline
             self.page3.pipeline_profile = self.pipeline_profile
-            self.page3.spatial_filter = self.spatial_filter
+            self.page3.hdr_merge = self.hdr_merge
             self.page3.temporal_filter = self.temporal_filter
+            self.page3.spatial_filter = self.spatial_filter
             self.page3.align = self.align
             self.page3.motion_support = motion_support
 
@@ -157,7 +162,6 @@ if __name__ == "__main__":
     parser.add_argument('--screen', type=int, default=0, help='Screen to save the calibration file for')
     parser.add_argument('--dir', type=str, help='Output directory for calibration file')
     parser.add_argument('--auto-progress', default=False, action="store_true", help='Enable auto-progress mode')
-    parser.add_argument('--ir-high-exposure', default=1500, type=float, help='IR camera exposure to use when capturing the screen')
     parser.add_argument('--ir-low-exposure', default=100, type=float, help='IR camera exposure to use when capturing the markers')
     parser.add_argument('--rgb-exposure', default=1500, type=float, help='RGB camera exposure')
     parser.add_argument('--laser-power', default=150, type=float, help='Laser dot grid projector power (0-360)')

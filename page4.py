@@ -149,6 +149,10 @@ class Page4(QWidget):
 
     def start(self) -> None:
         depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
+        if depth_sensor.is_option_read_only(rs.option.hdr_enabled):
+            print("Warning: Depth sensor HDR is read-only.")
+        else:
+            depth_sensor.set_option(rs.option.hdr_enabled, 0)
         if depth_sensor.is_option_read_only(rs.option.exposure):
             print("Warning: Depth sensor exposure is read-only.")
         else:

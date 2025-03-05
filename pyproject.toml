@@ -9,11 +9,14 @@ dependencies = [
     "matplotlib==3.9",
     "numpy<2",
     "numpy-quaternion>=2024.0.3",
+    "open3d>=0.19.0",
     "opencv-python>=4.11.0.86",
     "platformdirs>=4.3.6",
+    "pybind11-stubgen>=2.5.3",
     "pyinstaller==6.11",
     "pyrealsense2>=2.55.1.6486",
     "pyside6>=6.8.1.1",
-    "scikit-learn>=1.6.1",
-    "scikit-spatial>=8.1.0",
 ]
+
+[dependency-groups]
+dev = []

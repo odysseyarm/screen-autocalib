@@ -27,6 +27,7 @@ def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: f
             id += 1
     return points
 
+# -1,-1 for unaligned corners
 def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame, raw_color_frame, depth_sensor):
     # Adapted from https://github.com/IntelRealSense/librealsense/issues/5603#issuecomment-574019008
     depth_scale = depth_sensor.get_depth_scale()
@@ -42,7 +43,7 @@ def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame, raw_color_f
     depth_to_color_extrin =  depth_vsp.get_extrinsics_to(raw_color_frame.profile)
     color_to_depth_extrin =  color_vsp.get_extrinsics_to(depth_frame.profile)
 
-    aligned_corners = charuco_corners.copy()
+    aligned_corners = np.full_like(charuco_corners, np.nan)
     for i, color_point in enumerate(charuco_corners):
        aligned_corners[i] = rs.rs2_project_color_pixel_to_depth_pixel(
                     depth_frame.get_data(), depth_scale,
@@ -61,6 +62,8 @@ def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_fra
     corner: np.ndarray[Literal[2], np.dtype[np.float32]]
     for corner in charuco_corners:
         u, v = corner.ravel()
+        if u < 0 or v < 0:
+            continue
         depth = depth_frame.get_distance(int(u), int(v))
         point_3d = np.array(rs.rs2_deproject_pixel_to_point(depth_intrinsics, [u, v], depth), dtype=np.float32)
         points_3d.append(point_3d)
@@ -75,8 +78,9 @@ class Page3(QWidget):
         self.motion_support = False
         self.pipeline = pipeline
         self.pipeline_profile = None
-        self.spatial_filter: Optional[rs.spatial_filter] = None  # Placeholder for the spatial filter
+        self.hdr_merge: Optional[rs.hdr_merge] = None  # Placeholder for the HDR merge processing block
         self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
+        self.spatial_filter: Optional[rs.spatial_filter] = None  # Placeholder for the spatial filter
         self.align: Optional[rs.align] = None  # Placeholder for the align processing block
         self.auto_progress = auto_progress
         self.go_countdown_time = 3
@@ -409,8 +413,9 @@ class Page3(QWidget):
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
     def process_frame(self, frames: rs.frame) -> None:
-        frames = self.spatial_filter.process(frames)
-        frames = self.temporal_filter.process(frames).as_frameset()
+        frames = self.hdr_merge.process(frames)
+        frames = self.temporal_filter.process(frames)
+        frames = self.spatial_filter.process(frames).as_frameset()
         aligned_frames = self.align.process(frames)
         color_frame = aligned_frames.get_color_frame()
         depth_frame = aligned_frames.get_depth_frame()

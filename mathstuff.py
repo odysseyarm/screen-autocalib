@@ -2,64 +2,65 @@ import numpy as np
 import numpy.typing as npt
 import quaternion
 import pyrealsense2 as rs
-from typing import Any, List, Literal, Optional, Tuple, cast
-from skspatial.objects import Plane
-from sklearn.linear_model import RANSACRegressor
-from sklearn.base import BaseEstimator, RegressorMixin
+from typing import Any, List, Literal, Optional, Tuple, cast, TypeVar
+import open3d as o3d
 
-class PlaneModel(BaseEstimator, RegressorMixin):
-    def fit(self, X, y): # type: ignore
-        points = np.c_[X, y]
-        plane = Plane.best_fit(points)
-        self.normal_ = plane.normal
-        self.point_ = plane.point
-        return self
-
-    def predict(self, X): # type: ignore
-        d = -self.point_.dot(self.normal_)
-        return (-self.normal_[0] * X[:, 0] - self.normal_[1] * X[:, 1] - d) / self.normal_[2] # type: ignore
-
-def plane_from_points(points: npt.NDArray[np.float32], min_samples: int) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]]], float, float]:
-    # Prepare data for RANSAC
-    X = points[:, :2]  # X and Y coordinates
-    y = points[:, 2]   # Z coordinate
-
+T = TypeVar('T', np.float32, np.float64)
+def plane_from_points(points: npt.NDArray[T], min_samples: int, distance_threshold: float = 0.1, ransac_n: int = 30, num_iterations: int = 1000) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[T]], np.ndarray[Literal[3], np.dtype[T]]]], float, float]:
     if len(points) < min_samples:
         print(f"Only got {len(points)} points")
-        return None
+        return None, -1.0, -1.0
     print(f"Fitting plane to {len(points)} points")
 
-    try:
-        # Fit RANSAC regressor with PlaneModel
-        ransac = RANSACRegressor(
-            PlaneModel(), 
-            min_samples=min_samples,  # Minimum number of samples to define a plane
-            residual_threshold=0.01, 
-            max_trials=10000
-        )
-        ransac.fit(X, y)
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
 
-        # Extract inlier points
-        inlier_mask = ransac.inlier_mask_ # type: ignore
-        inliers = points[inlier_mask]
-        print(f"Ignoring {len(points) - len(inliers)} outliers ({100 * (len(points) - len(inliers)) / len(points):.2f}%)")
+    pcd = pcd.remove_non_finite_points()
+    pcd = pcd.remove_duplicated_points()
 
-        # Use skspatial to find the best fitting plane for the inliers
-        plane = Plane.best_fit(inliers)  # type: Plane  # type: ignore
-        dists = plane.distance_points(inliers)
-        rmse = np.sqrt(np.mean(dists**2))
-        max_error = np.max(dists)
-        print(f"Plane fit RMSE: {rmse}")
-        print(f"Max error: {max_error}")
-        print(f"Min error: {np.min(dists)}")
-
-        # Extract centroid and normal from the fitted plane
-        centroid = plane.point
-        normal = plane.normal
-    except Exception as _:
+    print("Running Open3D's segment_plane on the selected region...")
+    plane_model: np.ndarray[Literal[4], np.dtype[np.float64]]
+    plane_model, inliers = pcd.segment_plane(distance_threshold, # type: ignore
+                                             ransac_n,
+                                             num_iterations=num_iterations)
+    if len(inliers) == 0:
+        print("No plane found in the selected region. Please select a larger region.")
         return None, -1.0, -1.0
 
-    return (centroid, normal), rmse, max_error
+    # pylance why
+    # [A, B, C, D] = plane_model
+    A: np.float64 = plane_model[0]
+    B: np.float64 = plane_model[1]
+    C: np.float64 = plane_model[2]
+    D: np.float64 = plane_model[3]
+    print(f"Fitted plane: {A:.4f}*x + {B:.4f}*y + {C:.4f}*z + {D:.4f} = 0")
+
+    # For z = f(x,y) representation (assuming C is not near 0)
+    if abs(C) < 1e-6:
+        print("Warning: The plane is nearly completely vertical. Cannot express as z=f(x,y).")
+        return None, -1.0, -1.0
+
+    a = -A / C
+    b = -B / C
+    # c = -D / C
+
+    inlier_indices = inliers
+
+    normal_vec = np.array([a, b, -1.0], dtype=np.float64)
+    normal_vec /= np.linalg.norm(normal_vec)
+    inlier_points = np.asarray(pcd.points)[inlier_indices]
+
+    centroid: np.ndarray[Literal[3], np.dtype[np.float64]] = np.mean(inlier_points, axis=0)
+
+    norm_factor = np.linalg.norm([A, B, C])
+    errors = np.abs(np.dot(inlier_points, [A, B, C]) + D) / norm_factor
+    rmse = np.sqrt(np.mean(errors**2)) # type: ignore
+    max_error = np.max(errors)
+
+    centroid_t: np.ndarray[Literal[3], np.dtype[T]] = centroid.astype(points.dtype)
+    normal_vec_t: np.ndarray[Literal[3], np.dtype[T]] = normal_vec.astype(points.dtype)
+
+    return (centroid_t, normal_vec_t), rmse, max_error
 
 def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.float32], np.ndarray[Literal[3], np.float32]]) -> np.ndarray[Literal[4, 4], np.float64]:
     point, normal = plane
