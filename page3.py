@@ -70,7 +70,6 @@ def extract_3d_point(charuco_corner: np.ndarray, depth_frame: rs.depth_frame) ->
     return np.array(rs.rs2_deproject_pixel_to_point(depth_intrinsics, [u, v], depth), dtype=np.float32)
 
 def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_frame: rs.depth_frame) -> List[np.ndarray[Literal[3], np.dtype[np.float32]]]:
-    depth_intrinsics = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
     points_3d = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
 
     corner: np.ndarray[Literal[2], np.dtype[np.float32]]
@@ -236,10 +235,8 @@ class Page3(QWidget):
         depth_frame = self.latest_depth_frame
         depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
 
-        intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
         raw_color_image = np.asanyarray(raw_color_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
-        depth_image = np.asanyarray(depth_frame.get_data())
 
         # ------------------------------
         # Step 1. Detect the ChArUco board corners on the raw RGB image.
@@ -256,9 +253,6 @@ class Page3(QWidget):
         if charuco_ids is None:
             self.fail("No ChArUco board detected.")
             return
-
-        # Align the detected charuco corners from color to depth using your existing helper.
-        charuco_corners = align_corners_to_depth(charuco_corners, depth_frame, raw_color_frame, depth_sensor)
 
         # For visualization, draw the detected corners on the color image.
         cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners, charuco_ids, cornerColor=(0, 0, 255))
@@ -307,8 +301,6 @@ class Page3(QWidget):
                 expected_points.append(normalized_expected_board_points[id_[0]])
         detected_points = np.array(detected_points, dtype=np.float32)
         expected_points = np.array(expected_points, dtype=np.float32)
-        print(detected_points)
-        print(expected_points)
         if len(detected_points) < 16:
             self.fail("Insufficient detected points.")
             return
@@ -334,6 +326,13 @@ class Page3(QWidget):
         board_mask = np.zeros(raw_color_image.shape[:2], dtype=np.uint8)
         cv2.fillPoly(board_mask, [board_polygon_raw.reshape(-1, 2)], 255)
 
+        # self.fail("debugging")
+        # # plot draw the color image and the mask
+        # plt.figure()
+        # plt.imshow(raw_color_image)
+        # plt.plot(board_polygon_raw[:, 0, 0], board_polygon_raw[:, 0, 1], 'r-')
+        # plt.show()
+
         # ------------------------------
         # Step 4. Generate a grid of points over the board region and align them to the depth frame.
         # ------------------------------
@@ -350,12 +349,8 @@ class Page3(QWidget):
         # Step 5. Gather 3D points from all valid depth pixels within the board region.
         # ------------------------------
         points_3d = []
-        depth_h, depth_w = depth_image.shape
         for pt in valid_aligned_points:
             x_d, y_d = pt
-            # Check bounds before accessing the depth image.
-            if not (0 <= y_d < depth_h and 0 <= x_d < depth_w):
-                continue
 
             point_3d = extract_3d_point(pt, depth_frame)
             points_3d.append(np.array(point_3d, dtype=np.float32))
@@ -400,15 +395,16 @@ class Page3(QWidget):
         self.calibration_data.points_3d_aligned = [
             self.calibration_data.align_transform_mtx @ point for point in inlier_points
         ]
-        self.calibration_data.intrin = intrin
+        self.calibration_data.intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
 
-        # for debugging
+        # # for debugging
         # self.fail("debugging")
         # # display the point cloud of the board region
         # plt.figure()
         # ax = plt.axes(projection='3d')
 
-        # for i, point in enumerate(inlier_points):
+        # # for i, point in enumerate(inlier_points):
+        # for i, point in enumerate(points_3d):
         #     if i % 100 == 0:
         #         ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
 
@@ -420,22 +416,18 @@ class Page3(QWidget):
         # plt.show()
         # return
 
-        print("num points to deproject is " + str(len(detected_points)))
         # ------------------------------
         # Step 7. Recompute a homography using deprojected board corners.
         # ------------------------------
         # For each detected board corner (from aligned charuco detection), approximate its intersection with the plane.
         deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
-        count = 0
-        for pt in detected_points:
-            print("point " + str(pt))
-            deproj_pt = approximate_intersection(plane, intrin, pt[0], pt[1], 0, 1000)
-            print("deprojected point " + str(deproj_pt))
+        detected_points_aligned_to_depth = align_corners_to_depth(detected_points, depth_frame, raw_color_frame, depth_sensor)
+        for pt in detected_points_aligned_to_depth:
+            deproj_pt = approximate_intersection(plane, self.calibration_data.intrin, pt[0], pt[1], 0, 1000)
             if np.all(deproj_pt == 0):
                 continue
             deprojected_points.append(deproj_pt)
-            count += 1
-        print("deprojected")
+
         deprojected_points_aligned = [
             self.calibration_data.align_transform_mtx @ point for point in deprojected_points
         ]
@@ -449,7 +441,6 @@ class Page3(QWidget):
         if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
             self.fail("Deprojected points are not distinct.")
             return
-        print("aligned")
 
         # Compute transformation matrix to flatten the plane to the XY plane.
         self.calibration_data.xy_transformation_matrix_aligned = compute_xy_transformation_matrix(plane_aligned)
@@ -460,6 +451,10 @@ class Page3(QWidget):
             deprojected_points_aligned,
             self.calibration_data.xy_transformation_matrix_aligned
         )
+
+        # todo tomorrow the transformed points wont always have the same shape because we remove invalids
+        # print(expected_points)
+        # print(transformed_points[:, :2])
 
         # Compute the homography mapping expected board points to transformed deprojected points.
         self.calibration_data.h_aligned, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
@@ -517,7 +512,7 @@ class Page3(QWidget):
         ]
         self.calibration_data.best_quad_2d = []
         for point in self.calibration_data.best_quad:
-            point_2d = rs.rs2_project_point_to_pixel(intrin, point)
+            point_2d = rs.rs2_project_point_to_pixel(self.calibration_data.intrin, point)
             self.calibration_data.best_quad_2d.append(point_2d)
         self.calibration_data.best_quad_2d = np.array(self.calibration_data.best_quad_2d, dtype=np.int32)
 
