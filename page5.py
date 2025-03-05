@@ -14,7 +14,7 @@ import json
 import time
 
 class Page5(QWidget):
-    def __init__(self, parent: QWidget, exit_application: Callable[[], None], auto_progress: bool, screen_id: int, output_dir: str, screen: QScreen) -> None:
+    def __init__(self, parent: QWidget, exit_application: Callable[[], None], auto_progress: bool, screen_id: int, output_dir: str, screen: QScreen, screen_diagonal: float) -> None:
         super().__init__(parent)
         self.screen_size = screen.size()
         self.exit_application = exit_application
@@ -24,6 +24,7 @@ class Page5(QWidget):
         self.screen_id = screen_id
         self.output_dir = output_dir
         self.auto_progress = auto_progress
+        self.screen_diagonal = screen_diagonal
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -77,7 +78,55 @@ class Page5(QWidget):
                 self.done_timer.stop()
                 self.exit_application()
 
+    def transform_calibration_data(self, calibration_data: CalibrationData) -> CalibrationData:
+        diag_mm = self.screen_diagonal * 25.4 # inch to mm
+        width_px = self.screen_size.width()
+        height_px = self.screen_size.height()
+        aspect = width_px / height_px
+
+        desired_height_mm = diag_mm / np.sqrt(aspect**2 + 1)
+        desired_width_mm = aspect * desired_height_mm
+        print(f"Desired physical dimensions (mm): width = {desired_width_mm:.2f}, height = {desired_height_mm:.2f}")
+    
+        # we like meters
+        desired_width = desired_width_mm / 1000.0
+        desired_height = desired_height_mm / 1000.0
+
+        corners = np.array([[0, 0],
+                            [1, 0],
+                            [1, 1],
+                            [0, 1]], dtype=np.float32)
+        ones = np.ones((4, 1), dtype=np.float32)
+        corners_h = np.hstack([corners, ones])
+        mapped = (calibration_data.h_aligned @ corners_h.T).T
+        mapped = mapped[:, :2] / mapped[:, 2:3]
+
+        # assumes perfect screen rectangle
+        desired_corners = np.array([[0, 0],
+                                    [desired_width, 0],
+                                    [desired_width, desired_height],
+                                    [0, desired_height]], dtype=np.float32)
+
+        H_corr = cv2.getPerspectiveTransform(mapped.astype(np.float32), desired_corners)
+
+        calibration_data.h_aligned = H_corr @ calibration_data.h_aligned
+
+        pts = calibration_data.detected_marker_pattern_aligned_transformed.copy()  # shape (N, 3)
+        pts_h = np.hstack([pts[:, :2], np.ones((pts.shape[0], 1), dtype=np.float32)])
+        pts_transformed = (H_corr @ pts_h.T).T
+        pts_transformed = pts_transformed[:, :2] / pts_transformed[:, 2:3]
+        calibration_data.detected_marker_pattern_aligned_transformed[:, :2] = pts_transformed
+
+        H_corr_4x4 = np.eye(4)
+        H_corr_4x4[0:3, 0:3] = H_corr
+        calibration_data.xy_transformation_matrix_aligned = H_corr_4x4 @ calibration_data.xy_transformation_matrix_aligned
+
+        return calibration_data
+
     def start(self, calibration_data: CalibrationData) -> None:
+        if self.screen_diagonal is not None:
+            print("Transforming calibration data to respect screen diagonal and rectangle...")
+            calibration_data = self.transform_calibration_data(calibration_data)
         print("Drawing plots...")
         self.draw_plots(calibration_data)
         if self.auto_progress:

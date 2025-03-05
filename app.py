@@ -23,6 +23,9 @@ class MainWindow(QMainWindow):
 
         if not args.dir:
             args.dir = None
+        
+        if not args.screen_diagonal:
+            args.screen_diagonal = None
 
         super().__init__()
 
@@ -37,7 +40,7 @@ class MainWindow(QMainWindow):
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress)
         self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, self.calibration_data, screen)
         self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, self.calibration_data)
-        self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir, screen)
+        self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir, screen, args.screen_diagonal)
 
         self.stacked_widget.addWidget(self.page2)
         self.stacked_widget.addWidget(self.page3)
@@ -91,13 +94,13 @@ class MainWindow(QMainWindow):
                 depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
                 if depth_sensor:
                     depth_sensor.set_option(rs.option.depth_units, 0.0001)
-                    depth_sensor.set_option(rs.option.enable_auto_exposure, 0)
-                    depth_sensor.set_option(rs.option.hdr_enabled, 1)
+                    depth_sensor.set_option(rs.option.enable_auto_exposure, False)
+                    depth_sensor.set_option(rs.option.hdr_enabled, True)
                     depth_sensor.set_option(rs.option.laser_power, self.args.laser_power)
 
                 color_sensor = self.pipeline_profile.get_device().first_color_sensor()
                 if color_sensor:
-                    color_sensor.set_option(rs.option.enable_auto_exposure, 0)
+                    color_sensor.set_option(rs.option.enable_auto_exposure, False)
                     color_sensor.set_option(rs.option.exposure, self.args.rgb_exposure)
                     color_sensor.set_option(rs.option.sharpness, 100) 
 
@@ -193,6 +196,7 @@ def main():
     parser.add_argument('--ir-low-exposure', default=100, type=float, help='IR camera exposure to use when capturing the markers')
     parser.add_argument('--rgb-exposure', default=1500, type=float, help='RGB camera exposure')
     parser.add_argument('--laser-power', default=150, type=float, help='Laser dot grid projector power (0-360)')
+    parser.add_argument('--screen-diagonal', type=float, help='Screen diagonal size in inches')
     args = parser.parse_args()
 
     app = QApplication(sys.argv[:1])

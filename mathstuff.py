@@ -122,7 +122,7 @@ def evaluate_plane(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np
     centroid, normal = plane
     return np.dot(normal, point - centroid)
 
-def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-14):
+def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-12):
     def deproject(x, y, z):
         return np.array(rs.rs2_deproject_pixel_to_point(intrin, [x, y], z))
     
