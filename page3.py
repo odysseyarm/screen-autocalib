@@ -83,7 +83,7 @@ class Page3(QWidget):
     def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], auto_progress: bool, calibration_data: CalibrationData, screen: QScreen) -> None:
         super().__init__(parent)
         self.screen_size = screen.size()
-        self.exit_application = exit_application
+        self.main_window_exit_application = exit_application
         self.motion_support = False
         self.pipeline = pipeline
         self.pipeline_profile = None
@@ -102,8 +102,8 @@ class Page3(QWidget):
         self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
         self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
         self.data_thread: Optional[DataAcquisitionThread] = None
-        self.cols = 16
-        self.rows = 9
+        self.cols = 30
+        self.rows = 16
         self.next_page = next_page
         self.calibration_data = calibration_data
         self.init_ui()
@@ -204,7 +204,7 @@ class Page3(QWidget):
 
     def create_charuco_board(self) -> None:
         # Create the ChArUco board
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_1000)
         board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.03, aruco_dict)
 
         # Generate the ChArUco board image
@@ -253,9 +253,12 @@ class Page3(QWidget):
         if charuco_ids is None:
             self.fail("No ChArUco board detected.")
             return
+        
+        print("finished step 1/5")
 
         # For visualization, draw the detected corners on the color image.
-        cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners, charuco_ids, cornerColor=(0, 0, 255))
+        charuco_corners_depth_aligned = align_corners_to_depth(charuco_corners, depth_frame, raw_color_frame, depth_sensor)
+        cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners_depth_aligned, charuco_ids, cornerColor=(0, 0, 255))
         self.calibration_data.color_image = color_image
 
         # ------------------------------
@@ -308,15 +311,17 @@ class Page3(QWidget):
         if h_board is None:
             self.fail("Homography computation failed.")
             return
+
+        print("finished step 2/5")
         
         # ------------------------------
         # Step 3. Define the board region in the raw RGB image.
         # ------------------------------
         board_polygon_board = np.array([
-            [0, 0],
-            [1, 0],
-            [1, 1],
-            [0, 1]
+            [0.01, 0.01],
+            [0.99, 0.01],
+            [0.99, 0.99],
+            [0.01, 0.99]
         ], dtype=np.float32)
         h_board_inv = np.linalg.inv(h_board)
         board_polygon_raw = cv2.perspectiveTransform(board_polygon_board.reshape(-1, 1, 2), h_board_inv)
@@ -361,6 +366,8 @@ class Page3(QWidget):
             self.fail("No valid depth points found in board region.")
             return
 
+        print("finished step 3/5")
+
         # Fit a plane using the custom plane_from_points function.
         (plane, plane_rmse, plane_max_error, inlier_points) = plane_from_points(points_3d)
         if plane is None:
@@ -372,6 +379,8 @@ class Page3(QWidget):
 
         print("RMSE of plane fit: ", plane_rmse)
         print("Max error of plane fit: ", plane_max_error)
+
+        print("finished step 4/5")
 
         # ------------------------------
         # Step 6. Align the fitted plane with gravity.
@@ -428,7 +437,8 @@ class Page3(QWidget):
             deproj_pt = approximate_intersection(plane, self.calibration_data.intrin, pt[0], pt[1], 0, 1000)
             if np.all(deproj_pt == 0):
                 deprojected_points.append(np.array([np.NaN, np.NaN, np.NaN], dtype=np.float32))
-            deprojected_points.append(deproj_pt)
+            else:
+                deprojected_points.append(deproj_pt)
 
         deprojected_points_aligned = [
             self.calibration_data.align_transform_mtx @ point for point in deprojected_points
@@ -521,6 +531,8 @@ class Page3(QWidget):
             self.calibration_data.best_quad_2d.append(point_2d)
         self.calibration_data.best_quad_2d = np.array(self.calibration_data.best_quad_2d, dtype=np.int32)
 
+        print("finished step 5/5")
+
         # ------------------------------
         # Step 10. Finalize: update UI and proceed.
         # ------------------------------
@@ -575,10 +587,16 @@ class Page3(QWidget):
 
     def closeEvent(self, event: Any) -> None:
         self.stop_data_thread()
-        super().closeEvent(event)
 
     def exit_application(self) -> None:
         self.stop_data_thread()
-        if hasattr(self, 'pipeline') and self.pipeline:
-            self.pipeline.stop()
-        sys.exit()
+
+        # stopping the pipeline causes the app to hang
+        # if hasattr(self, 'pipeline') and self.pipeline and self.pipeline is not None:
+        #     try:
+        #         self.pipeline.stop()
+        #     except Exception as e:
+        #         print(f"Error stopping pipeline: {e}")
+        #     self.pipeline = None
+
+        self.main_window_exit_application()

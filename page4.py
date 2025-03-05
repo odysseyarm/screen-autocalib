@@ -215,4 +215,3 @@ class Page4(QWidget):
 
     def closeEvent(self, event: QEvent) -> None:
         self.stop_data_thread()
-        super().closeEvent(event)

@@ -11,6 +11,8 @@ from calibration_data import CalibrationData
 import argparse
 from typing import Optional
 
+import signal
+
 class MainWindow(QMainWindow):
     def __init__(self, args: argparse.Namespace, screen: QScreen) -> None:
         self.args = args
@@ -97,7 +99,7 @@ class MainWindow(QMainWindow):
                 if color_sensor:
                     color_sensor.set_option(rs.option.enable_auto_exposure, 0)
                     color_sensor.set_option(rs.option.exposure, self.args.rgb_exposure)
-
+                    color_sensor.set_option(rs.option.sharpness, 100) 
 
             self.hdr_merge = rs.hdr_merge()
             
@@ -105,6 +107,7 @@ class MainWindow(QMainWindow):
             self.temporal_filter = rs.temporal_filter()
             self.temporal_filter.set_option(rs.option.filter_smooth_alpha, .05)
             self.temporal_filter.set_option(rs.option.filter_smooth_delta, 20)
+            self.temporal_filter.set_option(rs.option.holes_fill, 7)
 
             self.spatial_filter = rs.spatial_filter()
             self.spatial_filter.set_option(rs.option.filter_magnitude, 2)
@@ -151,11 +154,36 @@ class MainWindow(QMainWindow):
         self.stacked_widget.setCurrentWidget(self.page5)
 
     def exit_application(self) -> None:
-        if hasattr(self, 'pipeline') and self.pipeline:
-            self.pipeline.stop()
-        sys.exit()
+        # stopping the pipeline causes the app to hang
+        # if hasattr(self, 'pipeline') and self.pipeline and self.pipeline is not None:
+        #     try:
+        #         self.pipeline.stop()
+        #     except Exception as e:
+        #         print(f"Error stopping pipeline: {e}")
+        #     self.pipeline = None
+        # print("stopped pipeline")
 
-if __name__ == "__main__":
+        QApplication.closeAllWindows()
+        QApplication.instance().quit()
+
+    def closeEvent(self, event) -> None:
+        # stopping the pipeline causes the app to hang
+        # if hasattr(self, 'pipeline') and self.pipeline and self.pipeline is not None:
+        #     try:
+        #         self.pipeline.stop()
+        #     except Exception as e:
+        #         print(f"Error stopping pipeline: {e}")
+        #     self.pipeline = None
+
+        self.page2.closeEvent(event)
+        self.page3.closeEvent(event)
+        self.page4.closeEvent(event)
+
+        event.accept()
+
+def main():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     parser = argparse.ArgumentParser(description='RealSense Camera GUI')
     parser.add_argument('--display', type=int, default=0, help='Display index to use')
     parser.add_argument('--bag', type=str, help='Bag file to stream')
@@ -183,3 +211,6 @@ if __name__ == "__main__":
     w.showFullScreen()
 
     sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()

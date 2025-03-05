@@ -42,7 +42,7 @@ class Page2(QWidget):
         super().__init__(parent)
         self.main_window = parent
         self.next_page = next_page
-        self.exit_application = exit_application
+        self.main_window_exit_application = exit_application
         self.auto_progress = auto_progress
         self.pipeline: Optional[rs.pipeline] = None
         self.data_thread: Optional[DataAcquisitionThread] = None
@@ -163,10 +163,15 @@ class Page2(QWidget):
 
     def closeEvent(self, event: QEvent) -> None:
         self.stop_data_thread()
-        super().closeEvent(event)
 
     def exit_application(self) -> None:
         self.stop_data_thread()
-        if hasattr(self, 'pipeline') and self.pipeline:
-            self.pipeline.stop()
-        sys.exit()
+
+        # if hasattr(self, 'pipeline') and self.pipeline and self.pipeline is not None:
+        #     try:
+        #         self.pipeline.stop()
+        #     except Exception as e:
+        #         print(f"Error stopping pipeline: {e}")
+        #     self.pipeline = None
+
+        self.main_window_exit_application()

@@ -13,12 +13,11 @@ class DataAcquisitionThread(QThread):
     def run(self):
         self.running = True
         while self.running:
-            try:
-                frames = self.pipeline.wait_for_frames()
+            success, frames = self.pipeline.try_wait_for_frames()
+            if success:
                 self.data_updated.emit(frames)
-            except Exception as e:
-                print(f"Warning: {e}")
+            else:
+                print("Failed to get frames (maybe doing blocking calculations)")
 
     def stop(self):
         self.running = False
-        self.wait()
