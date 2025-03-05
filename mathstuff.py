@@ -6,7 +6,7 @@ from typing import Any, List, Literal, Optional, Tuple, cast, TypeVar
 import open3d as o3d
 
 T = TypeVar('T', np.float32, np.float64)
-def plane_from_points(points: npt.NDArray[T], distance_threshold: float = 0.1, ransac_n: int = 30, num_iterations: int = 1000) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[T]], np.ndarray[Literal[3], np.dtype[T]]]], float, float, npt.NDArray[T]]:
+def plane_from_points(points: npt.NDArray[T], distance_threshold: float = 0.01, ransac_n: int = 30, num_iterations: int = 1000) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[T]], np.ndarray[Literal[3], np.dtype[T]]]], float, float, npt.NDArray[T]]:
     print(f"Fitting plane to {len(points)} points")
 
     pcd = o3d.geometry.PointCloud()
