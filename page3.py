@@ -351,6 +351,8 @@ class Page3(QWidget):
         points_3d = []
         for pt in valid_aligned_points:
             x_d, y_d = pt
+            if x_d < 0 or x_d >= depth_frame.get_width() or y_d < 0 or y_d >= depth_frame.get_height():
+                continue
 
             point_3d = extract_3d_point(pt, depth_frame)
             points_3d.append(np.array(point_3d, dtype=np.float32))
@@ -425,7 +427,7 @@ class Page3(QWidget):
         for pt in detected_points_aligned_to_depth:
             deproj_pt = approximate_intersection(plane, self.calibration_data.intrin, pt[0], pt[1], 0, 1000)
             if np.all(deproj_pt == 0):
-                continue
+                deprojected_points.append(np.array([np.NaN, np.NaN, np.NaN], dtype=np.float32))
             deprojected_points.append(deproj_pt)
 
         deprojected_points_aligned = [
@@ -456,8 +458,11 @@ class Page3(QWidget):
         # print(expected_points)
         # print(transformed_points[:, :2])
 
+        expected_points_without_nan = expected_points[~np.isnan(transformed_points[:, 0])]
+        transformed_points_without_nan = transformed_points[~np.isnan(transformed_points[:, 0])]
+
         # Compute the homography mapping expected board points to transformed deprojected points.
-        self.calibration_data.h_aligned, _ = cv2.findHomography(expected_points, transformed_points[:, :2])
+        self.calibration_data.h_aligned, _ = cv2.findHomography(expected_points_without_nan, transformed_points_without_nan[:, :2])
         if self.calibration_data.h_aligned is None:
             print("Error: Homography could not be computed.")
             return
