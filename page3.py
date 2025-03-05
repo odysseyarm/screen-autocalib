@@ -16,8 +16,13 @@ from data_acquisition import DataAcquisitionThread
 from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern
 from calibration_data import CalibrationData
 
-# import matplotlib
-# matplotlib.use('Qt5Agg')
+import matplotlib
+matplotlib.use('Qt5Agg')
+
+from matplotlib import pyplot as plt
+
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
 
 def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]:
     points = dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]()
@@ -360,13 +365,16 @@ class Page3(QWidget):
             return
 
         # Fit a plane using the custom plane_from_points function.
-        (plane, plane_rmse, plane_max_error) = plane_from_points(points_3d)
+        (plane, plane_rmse, plane_max_error, inlier_points) = plane_from_points(points_3d)
         if plane is None:
             self.fail("Plane fitting failed")
             return
         self.calibration_data.plane = plane
         self.calibration_data.plane_rmse = plane_rmse
         self.calibration_data.plane_max_error = plane_max_error
+
+        print("RMSE of plane fit: ", plane_rmse)
+        print("Max error of plane fit: ", plane_max_error)
 
         # ------------------------------
         # Step 6. Align the fitted plane with gravity.
@@ -390,20 +398,23 @@ class Page3(QWidget):
 
         # Align the 3D points with gravity.
         self.calibration_data.points_3d_aligned = [
-            self.calibration_data.align_transform_mtx @ point for point in points_3d
+            self.calibration_data.align_transform_mtx @ point for point in inlier_points
         ]
         self.calibration_data.intrin = intrin
 
         # for debugging
         # self.fail("debugging")
-        # display the point cloud of the board region
+        # # display the point cloud of the board region
         # plt.figure()
         # ax = plt.axes(projection='3d')
-        # ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2])
+
+        # for i, point in enumerate(inlier_points):
+        #     if i % 100 == 0:
+        #         ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
 
         # centroid, normal = plane
         # d = -np.dot(centroid, normal)
-        # xx, yy = np.meshgrid(np.linspace(-10000, 10000, 10), np.linspace(-10000, 10000, 10))
+        # xx, yy = np.meshgrid(np.linspace(-2, 2, 2), np.linspace(-2, 2, 2))
         # zz = (-normal[0] * xx - normal[1] * yy - d) * 1. / normal[2]
         # ax.plot_surface(xx, yy, zz, alpha=0.5)
         # plt.show()

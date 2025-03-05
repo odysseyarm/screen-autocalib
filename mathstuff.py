@@ -6,7 +6,7 @@ from typing import Any, List, Literal, Optional, Tuple, cast, TypeVar
 import open3d as o3d
 
 T = TypeVar('T', np.float32, np.float64)
-def plane_from_points(points: npt.NDArray[T], distance_threshold: float = 0.1, ransac_n: int = 30, num_iterations: int = 1000) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[T]], np.ndarray[Literal[3], np.dtype[T]]]], float, float]:
+def plane_from_points(points: npt.NDArray[T], distance_threshold: float = 0.1, ransac_n: int = 30, num_iterations: int = 1000) -> Tuple[Optional[Tuple[np.ndarray[Literal[3], np.dtype[T]], np.ndarray[Literal[3], np.dtype[T]]]], float, float, npt.NDArray[T]]:
     print(f"Fitting plane to {len(points)} points")
 
     pcd = o3d.geometry.PointCloud()
@@ -60,8 +60,9 @@ def plane_from_points(points: npt.NDArray[T], distance_threshold: float = 0.1, r
 
     centroid_t: np.ndarray[Literal[3], np.dtype[T]] = centroid.astype(points.dtype)
     normal_vec_t: np.ndarray[Literal[3], np.dtype[T]] = normal_vec.astype(points.dtype)
+    inlier_points_t: npt.NDArray[T] = inlier_points.astype(points.dtype)
 
-    return (centroid_t, normal_vec_t), rmse, max_error
+    return (centroid_t, normal_vec_t), rmse, max_error, inlier_points_t
 
 def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.float32], np.ndarray[Literal[3], np.float32]]) -> np.ndarray[Literal[4, 4], np.float64]:
     point, normal = plane

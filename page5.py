@@ -126,7 +126,7 @@ class Page5(QWidget):
         #     ax.scatter(point[0], point[2], point[1], c='b', marker='x', s=0.5)  # Swap Y and Z
         # display every 1000th point
         for i, point in enumerate(calibration_data.points_3d_aligned):
-            if i % 1000 == 0:
+            if i % 100 == 0:
                 ax.scatter(point[0], point[2], point[1], c='b', marker='x', s=0.5)
 
         for point in calibration_data.detected_marker_pattern_aligned:
