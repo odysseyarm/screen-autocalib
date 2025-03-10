@@ -1,11 +1,15 @@
 from typing import Callable, Optional
-import pyrealsense2 as rs
 import numpy as np
 import cv2
 from PySide6.QtCore import QTimer, Qt, QEvent
-from PySide6.QtGui import QImage, QPixmap, QPen, QPainter, QPaintEvent
+from PySide6.QtGui import QImage, QPixmap, QPen, QPainter, QPaintEvent, QResizeEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QHBoxLayout, QLabel
 from data_acquisition import DataAcquisitionThread
+from depth_sensor.interface import frames, pipeline
+
+class MainWindow(QWidget):
+    pipeline: Optional[pipeline.Pipeline]
+    pass
 
 class BracketOverlay(QWidget):
     def __init__(self, parent: QWidget) -> None:
@@ -38,13 +42,13 @@ class BracketOverlay(QWidget):
         painter.drawLine(window_width - 1, window_height - 50, window_width - 1, window_height - 1)
 
 class Page2(QWidget):
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], auto_progress: bool) -> None:
+    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], auto_progress: bool) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.next_page = next_page
         self.main_window_exit_application = exit_application
         self.auto_progress = auto_progress
-        self.pipeline: Optional[rs.pipeline] = None
+        self.pipeline: Optional[pipeline.Pipeline] = None
         self.data_thread: Optional[DataAcquisitionThread] = None
         self.countdown_timer: Optional[QTimer] = None
         self.remaining_time = 30
@@ -99,12 +103,15 @@ class Page2(QWidget):
         self.timer.start(1000)
 
     def check_realsense_device(self) -> None:
+        print(self.main_window.pipeline)
         if self.main_window.pipeline is not None:
             self.pipeline = self.main_window.pipeline
             self.start_steps()
 
     def start_steps(self) -> None:
         self.timer.stop()
+
+        assert self.pipeline is not None
 
         self.data_thread = DataAcquisitionThread(self.pipeline)
         self.data_thread.data_updated.connect(self.process_frame)
@@ -131,19 +138,19 @@ class Page2(QWidget):
             self.countdown_timer.stop()
         self.next_page()
 
-    def resizeEvent(self, event: QEvent) -> None:
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         if hasattr(self, 'camera_pixmap_item') and self.camera_pixmap_item:
             self.canvas.setSceneRect(0, 0, self.width(), self.height())
             self.bracket_overlay.resize(self.size())
 
-    def process_frame(self, frames: rs.frame) -> None:
-        color_frame = frames.get_color_frame()
+    def process_frame(self, composite_frame: frames.CompositeFrame) -> None:
+        color_frame = composite_frame.get_color_frame()
         if not color_frame:
             return
 
-        color_image = np.asanyarray(color_frame.get_data())
-        color_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
+        color_frame.set_format(frames.StreamFormat.RGB)
+        color_image = color_frame.get_data()
 
         h, w, ch = color_image.shape
         bytes_per_line = ch * w

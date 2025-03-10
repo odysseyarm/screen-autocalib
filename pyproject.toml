@@ -14,9 +14,14 @@ dependencies = [
     "platformdirs>=4.3.6",
     "pybind11-stubgen>=2.5.3",
     "pyinstaller==6.11",
+    "pyorbbecsdk",
     "pyrealsense2>=2.55.1.6486",
     "pyside6>=6.8.1.1",
+    "returns>=0.24.0",
 ]
 
 [dependency-groups]
 dev = []
+
+[tool.uv.sources]
+pyorbbecsdk = { git = "https://github.com/Abrahamh08/pyorbbecsdk", branch = "trunk-v2-main" }

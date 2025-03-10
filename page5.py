@@ -14,7 +14,7 @@ import json
 import time
 
 class Page5(QWidget):
-    def __init__(self, parent: QWidget, exit_application: Callable[[], None], auto_progress: bool, screen_id: int, output_dir: str, screen: QScreen, screen_diagonal: float) -> None:
+    def __init__(self, parent: QWidget, exit_application: Callable[[], None], auto_progress: bool, screen_id: int, output_dir: Optional[str], screen: QScreen, screen_diagonal: Optional[float]) -> None:
         super().__init__(parent)
         self.screen_size = screen.size()
         self.exit_application = exit_application
