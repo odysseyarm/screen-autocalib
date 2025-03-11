@@ -67,7 +67,7 @@ def extract_3d_point(charuco_corner: np.ndarray, depth_frame: depth_sensor.inter
     rs_intrinsics = rs.intrinsics()
     rs_intrinsics.fx, rs_intrinsics.fy, rs_intrinsics.height, rs_intrinsics.width = depth_intrinsics.fx, depth_intrinsics.fy, depth_intrinsics.height, depth_intrinsics.width
     rs_intrinsics.ppx, rs_intrinsics.ppy = depth_intrinsics.cx, depth_intrinsics.cy
-    rs_intrinsics.coeffs = [c.k1, c.k2, c.k3, c.k4, c.k5] # nooo k6
+    rs_intrinsics.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
     match depth_intrinsics.model:
         case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
             rs_intrinsics.model = rs.distortion.inverse_brown_conrady
