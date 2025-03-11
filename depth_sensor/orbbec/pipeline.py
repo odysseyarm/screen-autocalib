@@ -14,11 +14,13 @@ class Pipeline:
     _color_profile: pyorbbecsdk.VideoStreamProfile
     _depth_profile: pyorbbecsdk.VideoStreamProfile
     _ir_profile: pyorbbecsdk.VideoStreamProfile
+    _align_filter: pyorbbecsdk.AlignFilter
 
     # _spatial_filter: Optional[pyorbbecsdk.SpatialAdvancedFilter]
 
     def __init__(self):
         self._internal = pyorbbecsdk.Pipeline()
+        self._align_filter = pyorbbecsdk.AlignFilter(align_to_stream=pyorbbecsdk.OBStreamType.COLOR_STREAM)
         # self._spatial_filter = pyorbbecsdk.SpatialAdvancedFilter()
     
     def try_wait_for_frames(self, timeout_ms: int = 5000) -> Optional[depth_sensor.interface.frame.CompositeFrame]:
@@ -29,6 +31,8 @@ class Pipeline:
         # hack to get around receiving frames when not all streams are ready
         if frameset.get_color_frame() is None or frameset.get_ir_frame() is None: # type: ignore
             return None
+        
+        frameset = self._align_filter.process(frameset).as_frame_set()
 
         return frame.CompositeFrame(frameset)
     
@@ -41,14 +45,20 @@ class Pipeline:
         profile_list = self._internal.get_stream_profile_list(pyorbbecsdk.OBSensorType.IR_SENSOR)
         self._ir_profile = profile_list.get_video_stream_profile(1600, 0, pyorbbecsdk.OBFormat.Y8, 30)
 
-        profile_list = self._internal.get_d2c_depth_profile_list(self._color_profile, pyorbbecsdk.OBAlignMode.SW_MODE)
-        self._depth_profile = profile_list.get_default_video_stream_profile()
+        # d2c software doesn't work for some reason
+        # profile_list = self._internal.get_d2c_depth_profile_list(self._color_profile, pyorbbecsdk.OBAlignMode.SW_MODE)
+        # self._depth_profile = profile_list.get_default_video_stream_profile()
+
+        profile_list = self._internal.get_stream_profile_list(pyorbbecsdk.OBSensorType.DEPTH_SENSOR)
+        self._depth_profile = profile_list.get_video_stream_profile(1600, 0, pyorbbecsdk.OBFormat.Y16, 30)
 
         config.enable_stream(self._color_profile)
         config.enable_stream(self._ir_profile)
         config.enable_stream(self._depth_profile)
 
         config.set_align_mode(pyorbbecsdk.OBAlignMode.SW_MODE)
+
+        self._internal.enable_frame_sync()
 
         self._internal.start(config) # type: ignore
     
