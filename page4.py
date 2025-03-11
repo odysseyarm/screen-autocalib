@@ -10,9 +10,11 @@ from data_acquisition import DataAcquisitionThread
 import numpy as np
 from calibration_data import CalibrationData
 import mathstuff
+from depth_sensor.interface import pipeline as ds_pipeline
+from depth_sensor.interface import frame as ds_frame
 
 class Page4(QWidget):
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], auto_progress: bool, ir_low_exposure: float, calibration_data: CalibrationData) -> None:
+    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[ds_pipeline.Pipeline], auto_progress: bool, ir_low_exposure: float, calibration_data: CalibrationData) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.exit_application = exit_application
@@ -21,7 +23,7 @@ class Page4(QWidget):
         self.pipeline_profile = None
         self.auto_progress = auto_progress
         self.countdown_timer: Optional[QTimer] = None
-        self.latest_ir_frame: Optional[rs.frame] = None
+        self.latest_ir_frame: Optional[ds_frame.InfraredFrame] = None
         self.data_thread: Optional[DataAcquisitionThread] = None
         self.ir_low_exposure = ir_low_exposure
         self.remaining_time = 30
@@ -86,10 +88,9 @@ class Page4(QWidget):
         else:
             self.next_page()
 
-    def detect_markers(self, ir_frame: rs.frame) -> bool:
+    def detect_markers(self, ir_frame: ds_frame.InfraredFrame) -> bool:
         # Detect IR blobs in the depth image
-        markers_ir_image = np.asanyarray(ir_frame.get_data())
-        ir_image = markers_ir_image.astype(np.uint8)
+        ir_image = cv2.cvtColor(np.asanyarray(ir_frame.get_data()), cv2.COLOR_RGB2GRAY)
 
         # Apply a threshold to binarize the image
         _, binary_ir_image = cv2.threshold(ir_image, 150, 255, cv2.THRESH_BINARY)
@@ -152,15 +153,15 @@ class Page4(QWidget):
         self.instructions_label.setText(f"{msg}")
 
     def start(self) -> None:
-        depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
-        if depth_sensor.is_option_read_only(rs.option.hdr_enabled):
-            print("Warning: Depth sensor HDR is read-only.")
-        else:
-            depth_sensor.set_option(rs.option.hdr_enabled, 0)
-        if depth_sensor.is_option_read_only(rs.option.exposure):
-            print("Warning: Depth sensor exposure is read-only.")
-        else:
-            depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
+        # todo
+        # if depth_sensor.is_option_read_only(rs.option.hdr_enabled):
+        #     print("Warning: Depth sensor HDR is read-only.")
+        # else:
+        #     depth_sensor.set_option(rs.option.hdr_enabled, 0)
+        # if depth_sensor.is_option_read_only(rs.option.exposure):
+        #     print("Warning: Depth sensor exposure is read-only.")
+        # else:
+        #     depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
 
         self.data_thread = DataAcquisitionThread(self.pipeline)
         self.data_thread.data_updated.connect(self.process_frame)
@@ -187,15 +188,15 @@ class Page4(QWidget):
         if hasattr(self, 'camera_pixmap_item') and self.camera_pixmap_item:
             self.canvas.setSceneRect(0, 0, self.width(), self.height())
 
-    def process_frame(self, frames: rs.frame) -> None:
-        ir_frame = frames.get_infrared_frame(0)
+    def process_frame(self, frames: ds_frame.CompositeFrame) -> None:
+        ir_frame = frames.get_infrared_frame()
         if not ir_frame:
             return
 
-        self.latest_ir_frame = ir_frame
+        ir_frame.set_format(ds_frame.StreamFormat.RGB)
+        ir_image = cv2.Mat(ir_frame.get_data())
 
-        ir_image = np.asanyarray(ir_frame.get_data())
-        ir_image = cv2.cvtColor(ir_image, cv2.COLOR_BGR2RGB)
+        self.latest_ir_frame = ir_frame
 
         h, w, ch = ir_image.shape
         bytes_per_line = ch * w

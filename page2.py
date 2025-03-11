@@ -150,7 +150,7 @@ class Page2(QWidget):
             return
 
         color_frame.set_format(frame.StreamFormat.RGB)
-        color_image = color_frame.get_data()
+        color_image = cv2.Mat(color_frame.get_data())
 
         h, w, ch = color_image.shape
         bytes_per_line = ch * w

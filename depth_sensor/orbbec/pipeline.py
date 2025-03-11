@@ -27,7 +27,7 @@ class Pipeline:
             return None
 
         # hack to get around receiving frames when not all streams are ready
-        if frameset.get_color_frame() is None: # type: ignore
+        if frameset.get_color_frame() is None or frameset.get_ir_frame() is None: # type: ignore
             return None
 
         return frame.CompositeFrame(frameset)
@@ -39,7 +39,7 @@ class Pipeline:
         self._color_profile = profile_list.get_video_stream_profile(1920, 0, pyorbbecsdk.OBFormat.RGB, 30)
 
         profile_list = self._internal.get_stream_profile_list(pyorbbecsdk.OBSensorType.IR_SENSOR)
-        self._ir_profile = profile_list.get_default_video_stream_profile()
+        self._ir_profile = profile_list.get_video_stream_profile(1600, 0, pyorbbecsdk.OBFormat.Y8, 30)
 
         profile_list = self._internal.get_d2c_depth_profile_list(self._color_profile, pyorbbecsdk.OBAlignMode.SW_MODE)
         self._depth_profile = profile_list.get_default_video_stream_profile()

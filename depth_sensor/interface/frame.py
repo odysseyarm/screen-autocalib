@@ -10,9 +10,10 @@ class StreamFormat(enum.Enum):
     BGR = 1
     Z16 = 2
     Y8 = 3
-    UNKNOWN = 4
+    MJPG = 4
+    UNKNOWN = 5
 
-class ColorFrame(Protocol):
+class Frame(Protocol):
     def get_data(self) -> npt.ArrayLike:
         ...
     def get_format(self) -> StreamFormat:
@@ -26,7 +27,21 @@ class ColorFrame(Protocol):
     def get_height(self) -> int:
         ...
 
-class DepthFrame(Protocol):
+class ColorFrame(Frame, Protocol):
+    def get_data(self) -> npt.ArrayLike:
+        ...
+    def get_format(self) -> StreamFormat:
+        ...
+    def set_format(self, format: StreamFormat) -> None:
+        ...
+    def get_profile(self) -> StreamProfile:
+        ...
+    def get_width(self) -> int:
+        ...
+    def get_height(self) -> int:
+        ...
+
+class DepthFrame(Frame, Protocol):
     def get_data(self) -> npt.ArrayLike:
         ...
     def get_depth_scale(self) -> float:
@@ -40,13 +55,13 @@ class DepthFrame(Protocol):
     def get_height(self) -> int:
         ...
 
-class InfraredFrame(Protocol):
+class InfraredFrame(Frame, Protocol):
     def get_data(self) -> npt.ArrayLike:
         ...
     def get_profile(self) -> StreamProfile:
         ...
 
-class CompositeFrame(Protocol):
+class CompositeFrame(Frame, Protocol):
     def get_color_frame(self) -> ColorFrame:
         ...
     def get_depth_frame(self) -> DepthFrame:
