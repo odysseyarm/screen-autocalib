@@ -64,9 +64,11 @@ class MainWindow(QMainWindow):
         # Initialize the pipeline
         match self.args.source:
             case DepthCameraSource.orbbec:
+                self.page3.needs_c2d = False
                 self.pipeline = depth_sensor.orbbec.pipeline.Pipeline()
                 self.pipeline.start()
             case DepthCameraSource.realsense:
+                self.page3.needs_c2d = true
                 _pipeline = rs.pipeline()
                 config = rs.config()
 
@@ -136,9 +138,9 @@ class MainWindow(QMainWindow):
                 raise ValueError("Invalid depth camera source string")
 
         try:
+            self.page2.pipeline = self.pipeline
             self.page3.pipeline = self.pipeline
             self.page4.pipeline = self.pipeline
-            self.page2.pipeline = self.pipeline
 
             self.goto_page2()
 

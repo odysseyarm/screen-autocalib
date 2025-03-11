@@ -5,7 +5,7 @@ from PySide6.QtCore import QTimer, Qt, QEvent
 from PySide6.QtGui import QImage, QPixmap, QPen, QPainter, QPaintEvent, QResizeEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QHBoxLayout, QLabel
 from data_acquisition import DataAcquisitionThread
-from depth_sensor.interface import frames, pipeline
+from depth_sensor.interface import frame, pipeline
 
 class MainWindow(QWidget):
     pipeline: Optional[pipeline.Pipeline]
@@ -144,12 +144,12 @@ class Page2(QWidget):
             self.canvas.setSceneRect(0, 0, self.width(), self.height())
             self.bracket_overlay.resize(self.size())
 
-    def process_frame(self, composite_frame: frames.CompositeFrame) -> None:
+    def process_frame(self, composite_frame: frame.CompositeFrame) -> None:
         color_frame = composite_frame.get_color_frame()
         if not color_frame:
             return
 
-        color_frame.set_format(frames.StreamFormat.RGB)
+        color_frame.set_format(frame.StreamFormat.RGB)
         color_image = color_frame.get_data()
 
         h, w, ch = color_image.shape

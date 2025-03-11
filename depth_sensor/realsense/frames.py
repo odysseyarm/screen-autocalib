@@ -1,4 +1,4 @@
-import depth_sensor.interface.frames
+import depth_sensor.interface.frame
 import pyrealsense2
 import numpy.typing as npt
 
@@ -15,9 +15,9 @@ class CompositeFrame:
     _internal: pyrealsense2.composite_frame
     def __init__(self, frameset: pyrealsense2.composite_frame):
         self._internal = frameset
-    def get_color_frame(self) -> depth_sensor.interface.frames.ColorFrame:
+    def get_color_frame(self) -> depth_sensor.interface.frame.ColorFrame:
         return ColorFrame(self._internal.get_color_frame())
-    def get_depth_frame(self) -> depth_sensor.interface.frames.DepthFrame:
+    def get_depth_frame(self) -> depth_sensor.interface.frame.DepthFrame:
         return self._internal.get_depth_frame() # type: ignore
-    def get_infrared_frame(self, index: int = 0) -> depth_sensor.interface.frames.InfraredFrame:
+    def get_infrared_frame(self, index: int = 0) -> depth_sensor.interface.frame.InfraredFrame:
         return self._internal.get_infrared_frame(index) # type: ignore

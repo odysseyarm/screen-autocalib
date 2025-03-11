@@ -1,7 +1,6 @@
 import numpy as np
 import numpy.typing as npt
 import cv2
-import pyrealsense2 as rs
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap, QScreen
@@ -13,8 +12,12 @@ import time
 import quaternion
 from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
+import depth_sensor.interface.stream_profile
 from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern
 from calibration_data import CalibrationData
+import depth_sensor.interface.pipeline
+import depth_sensor.interface.frame
+import pyrealsense2 as rs
 
 import matplotlib
 matplotlib.use('Qt5Agg')
@@ -34,20 +37,20 @@ def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: f
     return points
 
 # -1,-1 for unaligned corners
-def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame, raw_color_frame, depth_sensor):
+def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame: depth_sensor.interface.frame.DepthFrame, raw_color_frame: depth_sensor.interface.frame.ColorFrame, pipeline: depth_sensor.interface.pipeline.Pipeline):
     # Adapted from https://github.com/IntelRealSense/librealsense/issues/5603#issuecomment-574019008
-    depth_scale = depth_sensor.get_depth_scale()
+    depth_scale = depth_frame.get_depth_scale()
     # idk what values make sense
     depth_min = 0.11 #meter
     depth_max = 8.0 #meter
 
-    depth_vsp = rs.video_stream_profile(depth_frame.profile)
-    color_vsp = rs.video_stream_profile(raw_color_frame.profile)
-    depth_intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
-    color_intrin = rs.video_stream_profile(raw_color_frame.profile).get_intrinsics()
+    depth_vsp = depth_frame.get_profile().as_video_stream_profile()
+    color_vsp = raw_color_frame.get_profile().as_video_stream_profile()
+    depth_intrin = depth_vsp.get_intrinsic()
+    color_intrin = color_vsp.get_intrinsic()
 
-    depth_to_color_extrin =  depth_vsp.get_extrinsics_to(raw_color_frame.profile)
-    color_to_depth_extrin =  color_vsp.get_extrinsics_to(depth_frame.profile)
+    depth_to_color_extrin =  depth_vsp.get_extrinsic_to(raw_color_frame.get_profile().as_video_stream_profile())
+    color_to_depth_extrin =  color_vsp.get_extrinsic_to(depth_frame.get_profile().as_video_stream_profile())
 
     aligned_corners = np.full_like(charuco_corners, np.nan)
     for i, color_point in enumerate(charuco_corners):
@@ -55,55 +58,55 @@ def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame, raw_color_f
                     depth_frame.get_data(), depth_scale,
                     depth_min, depth_max,
                     depth_intrin, color_intrin, color_to_depth_extrin, depth_to_color_extrin, color_point.ravel())
-    # depth_scale = depth_sensor.get_depth_scale()
-    # depth_intrin = depth_frame.profile.as_video_stream_profile().intrinsics
-    # color_intrin = raw_color_frame.profile.as_video_stream_profile().intrinsics
-    # depth_to_color_extrin = depth_frame.profile.get_extrinsics_to(raw_color_frame.profile)
+
     return aligned_corners
 
-def extract_3d_point(charuco_corner: np.ndarray, depth_frame: rs.depth_frame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
-    depth_intrinsics = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
+def extract_3d_point(charuco_corner: np.ndarray, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
+    depth_intrinsics = depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
+    c = depth_intrinsics.dist_coeffs
+    rs_intrinsics = rs.intrinsics()
+    rs_intrinsics.fx, rs_intrinsics.fy, rs_intrinsics.height, rs_intrinsics.width = depth_intrinsics.fx, depth_intrinsics.fy, depth_intrinsics.height, depth_intrinsics.width
+    rs_intrinsics.ppx, rs_intrinsics.ppy = depth_intrinsics.cx, depth_intrinsics.cy
+    rs_intrinsics.coeffs = [c.k1, c.k2, c.k3, c.k4, c.k5] # nooo k6
+    match depth_intrinsics.model:
+        case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
+            rs_intrinsics.model = rs.distortion.inverse_brown_conrady
+        case depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
+            rs_intrinsics.model = rs.distortion.brown_conrady
+        case _:
+            raise ValueError("Distortion model not supported")
     u, v = charuco_corner.ravel()
     if u < 0 or v < 0:
         return None
     depth = depth_frame.get_distance(int(u), int(v))
-    return np.array(rs.rs2_deproject_pixel_to_point(depth_intrinsics, [u, v], depth), dtype=np.float32)
-
-def extract_3d_points(charuco_corners: np.ndarray[Any, np.dtype[Any]], depth_frame: rs.depth_frame) -> List[np.ndarray[Literal[3], np.dtype[np.float32]]]:
-    points_3d = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
-
-    corner: np.ndarray[Literal[2], np.dtype[np.float32]]
-    for corner in charuco_corners:
-        point_3d = extract_3d_point(corner, depth_frame)
-        points_3d.append(point_3d)
-
-    return points_3d
+    if depth < 0.1 or depth > 10:
+        return None
+    return np.array(rs.rs2_deproject_pixel_to_point(rs_intrinsics, [u, v], depth), dtype=np.float32)
 
 class Page3(QWidget):
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[rs.pipeline], auto_progress: bool, calibration_data: CalibrationData, screen: QScreen) -> None:
+    needs_c2d: bool
+
+    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[depth_sensor.interface.pipeline.Pipeline], auto_progress: bool, calibration_data: CalibrationData, screen: QScreen) -> None:
         super().__init__(parent)
         self.screen_size = screen.size()
         self.main_window_exit_application = exit_application
         self.motion_support = False
         self.pipeline = pipeline
-        self.pipeline_profile = None
-        self.hdr_merge: Optional[rs.hdr_merge] = None  # Placeholder for the HDR merge processing block
-        self.temporal_filter: Optional[rs.temporal_filter] = None  # Placeholder for the temporal filter
-        self.spatial_filter: Optional[rs.spatial_filter] = None  # Placeholder for the spatial filter
-        self.align: Optional[rs.align] = None  # Placeholder for the align processing block
         self.auto_progress = auto_progress
         self.go_countdown_time = 3
         self.next_countdown_time = 5
         self.next_timer: Optional[QTimer] = None
         self.countdown_timer: Optional[QTimer] = None
-        self.latest_raw_color_frame: Optional[rs.frame] = None
-        self.latest_color_frame: Optional[rs.frame] = None
-        self.latest_depth_frame: Optional[rs.frame] = None
-        self.madgwick = Madgwick(gain=0.5)  # Initialize Madgwick filter
-        self.Q = np.array([1.0, 0.0, 0.0, 0.0])  # Initial quaternion
+        self.latest_raw_color_frame: Optional[depth_sensor.interface.frame.ColorFrame] = None
+        self.latest_color_frame: Optional[depth_sensor.interface.frame.ColorFrame] = None
+        self.latest_depth_frame: Optional[depth_sensor.interface.frame.DepthFrame] = None
+        self.madgwick = Madgwick(gain=0.5)
+        self.Q = np.array([1.0, 0.0, 0.0, 0.0])
         self.data_thread: Optional[DataAcquisitionThread] = None
         self.cols = 30
         self.rows = 16
+        # self.cols = 12
+        # self.rows = 7
         self.next_page = next_page
         self.calibration_data = calibration_data
         self.init_ui()
@@ -208,11 +211,11 @@ class Page3(QWidget):
         board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.03, aruco_dict)
 
         # Generate the ChArUco board image
-        board_image = board.generateImage(self.screen_size.toTuple(), marginSize=0, borderBits=1)
+        board_image = board.generateImage(self.screen_size.toTuple(), marginSize=0, borderBits=1) # type: ignore
 
-        height, width = board_image.shape[:2]
-        bytes_per_line = width
-        qt_image = QImage(board_image.data, width, height, bytes_per_line, QImage.Format.Format_Grayscale8)
+        height, width = board_image.shape[:2] # type: ignore
+        bytes_per_line = width # type: ignore
+        qt_image = QImage(board_image.data, width, height, bytes_per_line, QImage.Format.Format_Grayscale8) # type: ignore
         pixmap = QPixmap.fromImage(qt_image)
 
         self.label.setPixmap(pixmap)
@@ -226,14 +229,20 @@ class Page3(QWidget):
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
     def detect_charuco_corners(self) -> None:
-        if not self.latest_color_frame or not self.latest_depth_frame:
-            self.fail("No frames available for ChArUco board detection.")
-            return
-
         raw_color_frame = self.latest_raw_color_frame
         color_frame = self.latest_color_frame
         depth_frame = self.latest_depth_frame
-        depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
+
+        if self.pipeline is None:
+            self.fail("Pipeline is None")
+            return
+        
+        if raw_color_frame is None or color_frame is None or depth_frame is None:
+            self.fail("No frames available for ChArUco board detection.")
+            return
+        
+        self.pipeline.stop()
+        self.stop_data_thread()
 
         raw_color_image = np.asanyarray(raw_color_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
@@ -257,7 +266,10 @@ class Page3(QWidget):
         print("finished step 1/5")
 
         # For visualization, draw the detected corners on the color image.
-        charuco_corners_depth_aligned = align_corners_to_depth(charuco_corners, depth_frame, raw_color_frame, depth_sensor)
+        if self.needs_c2d:
+            charuco_corners_depth_aligned = align_corners_to_depth(charuco_corners, depth_frame, raw_color_frame, self.pipeline)
+        else:
+            charuco_corners_depth_aligned = charuco_corners
         cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners_depth_aligned, charuco_ids, cornerColor=(0, 0, 255))
         self.calibration_data.color_image = color_image
 
@@ -306,10 +318,14 @@ class Page3(QWidget):
         expected_points = np.array(expected_points, dtype=np.float32)
         if len(detected_points) < 16:
             self.fail("Insufficient detected points.")
+            self.pipeline.start()
+            self.start_data_acquisition()
             return
         h_board, _ = cv2.findHomography(detected_points, expected_points)
         if h_board is None:
             self.fail("Homography computation failed.")
+            self.pipeline.start()
+            self.start_data_acquisition()
             return
 
         print("finished step 2/5")
@@ -337,6 +353,7 @@ class Page3(QWidget):
         # plt.imshow(raw_color_image)
         # plt.plot(board_polygon_raw[:, 0, 0], board_polygon_raw[:, 0, 1], 'r-')
         # plt.show()
+        # return
 
         # ------------------------------
         # Step 4. Generate a grid of points over the board region and align them to the depth frame.
@@ -345,7 +362,10 @@ class Page3(QWidget):
         grid_points = np.vstack((xs, ys)).T.astype(np.float32)
 
         # Use align_corners_to_depth on the grid points.
-        aligned_grid_points = align_corners_to_depth(grid_points, depth_frame, raw_color_frame, depth_sensor)
+        if self.needs_c2d:
+            aligned_grid_points = align_corners_to_depth(grid_points, depth_frame, raw_color_frame, depth_sensor)
+        else:
+            aligned_grid_points = grid_points
         # Filter out points that did not map correctly (marked as (-1, -1)).
         valid_mask = (aligned_grid_points[:, 0] != -1) & (aligned_grid_points[:, 1] != -1)
         valid_aligned_points = aligned_grid_points[valid_mask].astype(np.int32)
@@ -356,22 +376,42 @@ class Page3(QWidget):
         points_3d = []
         for pt in valid_aligned_points:
             x_d, y_d = pt
+
             if x_d < 0 or x_d >= depth_frame.get_width() or y_d < 0 or y_d >= depth_frame.get_height():
                 continue
 
             point_3d = extract_3d_point(pt, depth_frame)
-            points_3d.append(np.array(point_3d, dtype=np.float32))
+            if point_3d is not None:
+                points_3d.append(np.array(point_3d, dtype=np.float32))
         points_3d = np.array(points_3d)
         if len(points_3d) == 0:
             self.fail("No valid depth points found in board region.")
+            self.pipeline.start()
+            self.start_data_acquisition()
             return
 
         print("finished step 3/5")
+
+        # # for debugging
+        # self.fail("debugging")
+        # # display the point cloud of the board region
+        # plt.figure()
+        # ax = plt.axes(projection='3d')
+
+        # # for i, point in enumerate(inlier_points):
+        # for i, point in enumerate(points_3d):
+        #     # if i % 100 == 0:
+        #     ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
+
+        # plt.show()
+        # return
 
         # Fit a plane using the custom plane_from_points function.
         (plane, plane_rmse, plane_max_error, inlier_points) = plane_from_points(points_3d)
         if plane is None:
             self.fail("Plane fitting failed")
+            self.pipeline.start()
+            self.start_data_acquisition()
             return
         self.calibration_data.plane = plane
         self.calibration_data.plane_rmse = plane_rmse
@@ -406,7 +446,7 @@ class Page3(QWidget):
         self.calibration_data.points_3d_aligned = [
             self.calibration_data.align_transform_mtx @ point for point in inlier_points
         ]
-        self.calibration_data.intrin = rs.video_stream_profile(depth_frame.profile).get_intrinsics()
+        self.calibration_data.intrin = depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
 
         # # for debugging
         # self.fail("debugging")
@@ -416,12 +456,12 @@ class Page3(QWidget):
 
         # # for i, point in enumerate(inlier_points):
         # for i, point in enumerate(points_3d):
-        #     if i % 100 == 0:
+        #     if i % 10 == 0:
         #         ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
 
         # centroid, normal = plane
         # d = -np.dot(centroid, normal)
-        # xx, yy = np.meshgrid(np.linspace(-2, 2, 2), np.linspace(-2, 2, 2))
+        # xx, yy = np.meshgrid(np.linspace(-0.2, 0.2, 10), np.linspace(-0.2, 0.2, 10))
         # zz = (-normal[0] * xx - normal[1] * yy - d) * 1. / normal[2]
         # ax.plot_surface(xx, yy, zz, alpha=0.5)
         # plt.show()
@@ -432,7 +472,10 @@ class Page3(QWidget):
         # ------------------------------
         # For each detected board corner (from aligned charuco detection), approximate its intersection with the plane.
         deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
-        detected_points_aligned_to_depth = align_corners_to_depth(detected_points, depth_frame, raw_color_frame, depth_sensor)
+        if self.needs_c2d:
+            detected_points_aligned_to_depth = align_corners_to_depth(detected_points, depth_frame, raw_color_frame, depth_sensor)
+        else:
+            detected_points_aligned_to_depth = detected_points
         for pt in detected_points_aligned_to_depth:
             deproj_pt = approximate_intersection(plane, self.calibration_data.intrin, pt[0], pt[1], 0, 1000)
             if np.all(deproj_pt == 0):
@@ -452,6 +495,7 @@ class Page3(QWidget):
         )
         if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
             self.fail("Deprojected points are not distinct.")
+            self.pipeline.start()
             return
 
         # Compute transformation matrix to flatten the plane to the XY plane.
@@ -543,36 +587,41 @@ class Page3(QWidget):
         self.label.hide()
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
-    def process_frame(self, frames: rs.frame) -> None:
-        frames = self.hdr_merge.process(frames)
-        frames = self.temporal_filter.process(frames)
-        frames = self.spatial_filter.process(frames).as_frameset()
-        aligned_frames = self.align.process(frames)
-        color_frame = aligned_frames.get_color_frame()
-        depth_frame = aligned_frames.get_depth_frame()
+        self.pipeline.start()
 
-        if self.motion_support:
-            accel_frame = frames.first_or_default(rs.stream.accel)
-            gyro_frame = frames.first_or_default(rs.stream.gyro)
+    def process_frame(self, frames: depth_sensor.interface.frame.CompositeFrame) -> None:
+        # frames = self.hdr_merge.process(frames)
+        # frames = self.temporal_filter.process(frames)
+        # frames = self.spatial_filter.process(frames).as_frameset()
+        # aligned_frames = self.align.process(frames)
+        # color_frame = aligned_frames.get_color_frame()
+        # depth_frame = aligned_frames.get_depth_frame()
 
-        if self.motion_support:
-            if not color_frame or not accel_frame or not gyro_frame:
-                return
-        else:
-            if not color_frame:
-                return
+        # if self.motion_support:
+        #     accel_frame = frames.first_or_default(rs.stream.accel)
+        #     gyro_frame = frames.first_or_default(rs.stream.gyro)
 
+        # if self.motion_support:
+        #     if not color_frame or not accel_frame or not gyro_frame:
+        #         return
+        # else:
+        #     if not color_frame:
+        #         return
+
+        # self.latest_raw_color_frame = frames.get_color_frame()
+        # self.latest_color_frame = color_frame
+        # self.latest_depth_frame = depth_frame
+
+        # if self.motion_support:
+        #     accel_data = accel_frame.as_motion_frame().get_motion_data()
+        #     gyro_data = gyro_frame.as_motion_frame().get_motion_data()
+
+        #     # Update Madgwick filter
+        #     # Swap coordinates because the Madgwick expects z to be gravity
+        #     self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.z, -gyro_data.y], acc=[accel_data.x, accel_data.z, -accel_data.y])
         self.latest_raw_color_frame = frames.get_color_frame()
-        self.latest_color_frame = color_frame
-        self.latest_depth_frame = depth_frame
-
-        if self.motion_support:
-            accel_data = accel_frame.as_motion_frame().get_motion_data()
-            gyro_data = gyro_frame.as_motion_frame().get_motion_data()
-
-            # Update Madgwick filter
-            # Swap coordinates because the Madgwick expects z to be gravity
-            self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.z, -gyro_data.y], acc=[accel_data.x, accel_data.z, -accel_data.y])
+        self.latest_color_frame = frames.get_color_frame()
+        self.latest_depth_frame = frames.get_depth_frame()
 
     def start_data_acquisition(self) -> None:
         if self.pipeline:

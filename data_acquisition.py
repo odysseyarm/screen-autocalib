@@ -1,11 +1,11 @@
 from PySide6.QtCore import QThread, Signal, QObject
 from typing import Optional
 
-import depth_sensor.interface.frames
+import depth_sensor.interface.frame
 import depth_sensor.interface.pipeline
 
 class DataAcquisitionThread(QThread):
-    data_updated = Signal(depth_sensor.interface.frames.CompositeFrame)  # Signal to emit updated frames
+    data_updated = Signal(depth_sensor.interface.frame.CompositeFrame)  # Signal to emit updated frames
 
     def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline, parent: Optional[QObject] = None):
         super().__init__(parent)

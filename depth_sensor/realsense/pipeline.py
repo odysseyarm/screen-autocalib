@@ -1,5 +1,5 @@
 import pyrealsense2
-import depth_sensor.interface.frames
+import depth_sensor.interface.frame
 from . import frames
 import typing
 
@@ -20,7 +20,7 @@ class Pipeline:
     def _(self, _pipeline: pyrealsense2.pipeline) -> None:
         self._internal = _pipeline
 
-    def try_wait_for_frames(self, timeout_ms: int = 5000) -> typing.Optional[depth_sensor.interface.frames.CompositeFrame]:
+    def try_wait_for_frames(self, timeout_ms: int = 5000) -> typing.Optional[depth_sensor.interface.frame.CompositeFrame]:
         success, frameset = self._internal.try_wait_for_frames(timeout_ms)
         if not success:
             return None

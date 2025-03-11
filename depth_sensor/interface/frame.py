@@ -3,6 +3,8 @@ from typing import Protocol
 
 import numpy.typing as npt
 
+from depth_sensor.interface.stream_profile import StreamProfile
+
 class StreamFormat(enum.Enum):
     RGB = 0
     BGR = 1
@@ -10,24 +12,38 @@ class StreamFormat(enum.Enum):
     Y8 = 3
     UNKNOWN = 4
 
-class Frame(Protocol):
-    def get_data(self) -> npt.ArrayLike:
-        ...
-
-class ColorFrame(Frame, Protocol):
+class ColorFrame(Protocol):
     def get_data(self) -> npt.ArrayLike:
         ...
     def get_format(self) -> StreamFormat:
         ...
     def set_format(self, format: StreamFormat) -> None:
         ...
-
-class DepthFrame(Frame, Protocol):
-    def get_data(self) -> npt.ArrayLike:
+    def get_profile(self) -> StreamProfile:
+        ...
+    def get_width(self) -> int:
+        ...
+    def get_height(self) -> int:
         ...
 
-class InfraredFrame(Frame, Protocol):
+class DepthFrame(Protocol):
     def get_data(self) -> npt.ArrayLike:
+        ...
+    def get_depth_scale(self) -> float:
+        ...
+    def get_distance(self, x: int, y: int) -> float:
+        ...
+    def get_profile(self) -> StreamProfile:
+        ...
+    def get_width(self) -> int:
+        ...
+    def get_height(self) -> int:
+        ...
+
+class InfraredFrame(Protocol):
+    def get_data(self) -> npt.ArrayLike:
+        ...
+    def get_profile(self) -> StreamProfile:
         ...
 
 class CompositeFrame(Protocol):
