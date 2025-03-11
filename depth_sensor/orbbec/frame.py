@@ -76,12 +76,10 @@ class DepthFrame:
         return stream_profile.StreamProfile(self._internal.get_stream_profile())
     
     def get_width(self) -> int:
-        # not a bug, this is intentional
-        return self._internal.get_height()
+        return self._internal.get_width()
 
     def get_height(self) -> int:
-        # not a bug, this is intentional
-        return self._internal.get_width()
+        return self._internal.get_height()
 
 class CompositeFrame:
     _internal: pyorbbecsdk.FrameSet
