@@ -61,27 +61,14 @@ def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame: depth_senso
 
     return aligned_corners
 
-def extract_3d_point(charuco_corner: np.ndarray, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
-    depth_intrinsics = depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
-    c = depth_intrinsics.dist_coeffs
-    rs_intrinsics = rs.intrinsics()
-    rs_intrinsics.fx, rs_intrinsics.fy, rs_intrinsics.height, rs_intrinsics.width = depth_intrinsics.fx, depth_intrinsics.fy, depth_intrinsics.height, depth_intrinsics.width
-    rs_intrinsics.ppx, rs_intrinsics.ppy = depth_intrinsics.cx, depth_intrinsics.cy
-    rs_intrinsics.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
-    match depth_intrinsics.model:
-        case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
-            rs_intrinsics.model = rs.distortion.inverse_brown_conrady
-        case depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
-            rs_intrinsics.model = rs.distortion.brown_conrady
-        case _:
-            raise ValueError("Distortion model not supported")
+def extract_3d_point(charuco_corner: np.ndarray, rs_depth_intrins: rs.intrinsics, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
     u, v = charuco_corner.ravel()
     if u < 0 or v < 0:
         return None
     depth = depth_frame.get_distance(int(u), int(v))
     if depth < 0.1 or depth > 10:
         return None
-    return np.array(rs.rs2_deproject_pixel_to_point(rs_intrinsics, [u, v], depth), dtype=np.float32)
+    return np.array(rs.rs2_deproject_pixel_to_point(rs_depth_intrins, [u, v], depth), dtype=np.float32)
 
 class Page3(QWidget):
     needs_c2d: bool
@@ -370,6 +357,20 @@ class Page3(QWidget):
         valid_mask = (aligned_grid_points[:, 0] != -1) & (aligned_grid_points[:, 1] != -1)
         valid_aligned_points = aligned_grid_points[valid_mask].astype(np.int32)
 
+        depth_intrinsics = depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
+        c = depth_intrinsics.dist_coeffs
+        rs_depth_intrins = rs.intrinsics()
+        rs_depth_intrins.fx, rs_depth_intrins.fy, rs_depth_intrins.height, rs_depth_intrins.width = depth_intrinsics.fx, depth_intrinsics.fy, depth_intrinsics.height, depth_intrinsics.width
+        rs_depth_intrins.ppx, rs_depth_intrins.ppy = depth_intrinsics.cx, depth_intrinsics.cy
+        rs_depth_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
+        match depth_intrinsics.model:
+            case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
+                rs_depth_intrins.model = rs.distortion.inverse_brown_conrady
+            case depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
+                rs_depth_intrins.model = rs.distortion.brown_conrady
+            case _:
+                raise ValueError("Distortion model not supported")
+
         # ------------------------------
         # Step 5. Gather 3D points from all valid depth pixels within the board region.
         # ------------------------------
@@ -380,7 +381,7 @@ class Page3(QWidget):
             if x_d < 0 or x_d >= depth_frame.get_width() or y_d < 0 or y_d >= depth_frame.get_height():
                 continue
 
-            point_3d = extract_3d_point(pt, depth_frame)
+            point_3d = extract_3d_point(pt, rs_depth_intrins, depth_frame)
             if point_3d is not None:
                 points_3d.append(np.array(point_3d, dtype=np.float32))
         points_3d = np.array(points_3d)
@@ -392,15 +393,15 @@ class Page3(QWidget):
 
         print("finished step 3/5")
 
-        # # for debugging
-        # self.fail("debugging")
-        # # display the point cloud of the board region
-        # plt.figure()
-        # ax = plt.axes(projection='3d')
+        # for debugging
+        self.fail("debugging")
+        # display the point cloud of the board region
+        plt.figure()
+        ax = plt.axes(projection='3d')
 
-        # # for i, point in enumerate(inlier_points):
+        # for i, point in enumerate(inlier_points):
         # for i, point in enumerate(points_3d):
-        #     # if i % 100 == 0:
+        #      if i % 100 == 0:
         #     ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
 
         # plt.show()
@@ -446,7 +447,7 @@ class Page3(QWidget):
         self.calibration_data.points_3d_aligned = [
             self.calibration_data.align_transform_mtx @ point for point in inlier_points
         ]
-        self.calibration_data.intrin = depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
+        self.calibration_data.intrin = rs_depth_intrins
 
         # # for debugging
         # self.fail("debugging")
