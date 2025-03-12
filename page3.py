@@ -17,6 +17,7 @@ from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply
 from calibration_data import CalibrationData
 import depth_sensor.interface.pipeline
 import depth_sensor.interface.frame
+from depth_sensor.interface import pipeline as ds_pipeline
 import pyrealsense2 as rs
 
 import matplotlib
@@ -627,7 +628,8 @@ class Page3(QWidget):
     def start_data_acquisition(self) -> None:
         if self.pipeline:
             self.data_thread = DataAcquisitionThread(self.pipeline)
-            self.data_thread.data_updated.connect(self.process_frame)
+            self.data_thread.frame_processor.filters = ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.ALIGN_D2C
+            self.data_thread.frame_processor.data_updated.connect(self.process_frame)
             self.data_thread.start()
 
     def stop_data_thread(self) -> None:

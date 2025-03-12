@@ -114,7 +114,7 @@ class Page2(QWidget):
         assert self.pipeline is not None
 
         self.data_thread = DataAcquisitionThread(self.pipeline)
-        self.data_thread.data_updated.connect(self.process_frame)
+        self.data_thread.frame_processor.data_updated.connect(self.process_frame)
         self.data_thread.start()
 
         if self.auto_progress:

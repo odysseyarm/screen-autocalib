@@ -164,7 +164,7 @@ class Page4(QWidget):
         #     depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
 
         self.data_thread = DataAcquisitionThread(self.pipeline)
-        self.data_thread.data_updated.connect(self.process_frame)
+        self.data_thread.frame_processor.data_updated.connect(self.process_frame)
         self.data_thread.start()
 
         if self.auto_progress:

@@ -1,6 +1,6 @@
 import pyrealsense2
 import depth_sensor.interface.frame
-from . import frames
+from . import frame
 import typing
 
 from functools import singledispatch
@@ -24,7 +24,7 @@ class Pipeline:
         success, frameset = self._internal.try_wait_for_frames(timeout_ms)
         if not success:
             return None
-        return frames.CompositeFrame(frameset)
+        return frame.CompositeFrame(frameset)
     
     def start(self) -> None:
         self._internal.start()

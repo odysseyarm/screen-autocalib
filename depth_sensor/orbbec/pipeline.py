@@ -1,6 +1,5 @@
 import pyorbbecsdk
 
-from . import frame
 from . import stream_profile
 import depth_sensor.interface.frame
 import depth_sensor.interface.pipeline
@@ -14,16 +13,16 @@ class Pipeline:
     _color_profile: pyorbbecsdk.VideoStreamProfile
     _depth_profile: pyorbbecsdk.VideoStreamProfile
     _ir_profile: pyorbbecsdk.VideoStreamProfile
-    _align_filter: pyorbbecsdk.AlignFilter
 
-    # _spatial_filter: Optional[pyorbbecsdk.SpatialAdvancedFilter]
+    _noise_removal_filter: Optional[pyorbbecsdk.NoiseRemovalFilter] = None
+    _temporal_filter: Optional[pyorbbecsdk.TemporalFilter] = None
+    _spatial_filter: Optional[pyorbbecsdk.SpatialAdvancedFilter] = None
+    _align_d2c_filter: Optional[pyorbbecsdk.AlignFilter] = None
 
     def __init__(self):
         self._internal = pyorbbecsdk.Pipeline()
-        self._align_filter = pyorbbecsdk.AlignFilter(align_to_stream=pyorbbecsdk.OBStreamType.COLOR_STREAM)
-        # self._spatial_filter = pyorbbecsdk.SpatialAdvancedFilter()
     
-    def try_wait_for_frames(self, timeout_ms: int = 5000) -> Optional[depth_sensor.interface.frame.CompositeFrame]:
+    def try_wait_for_frames(self, timeout_ms: int = 5000) -> Optional[pyorbbecsdk.FrameSet]:
         frameset = self._internal.wait_for_frames(timeout_ms)
         if frameset is None: # type: ignore
             return None
@@ -31,11 +30,9 @@ class Pipeline:
         # hack to get around receiving frames when not all streams are ready
         if frameset.get_color_frame() is None or frameset.get_ir_frame() is None: # type: ignore
             return None
-        
-        frameset = self._align_filter.process(frameset).as_frame_set()
 
-        return frame.CompositeFrame(frameset)
-    
+        return frameset
+
     def start(self) -> None:
         config = pyorbbecsdk.Config()
 
@@ -91,3 +88,40 @@ class Pipeline:
         elif stream == depth_sensor.interface.pipeline.Stream.INFRARED:
             return self._ir_profile
         raise ValueError("Unknown stream")
+    
+    def hdr_supported(self) -> bool:
+        return self._internal.get_device().is_property_supported(pyorbbecsdk.OBPropertyID.OB_STRUCT_DEPTH_HDR_CONFIG, pyorbbecsdk.OBPermissionType.PERMISSION_READ_WRITE)
+
+    def filters_process(self, frameset: pyorbbecsdk.FrameSet, filters: depth_sensor.interface.pipeline.Filter) -> pyorbbecsdk.FrameSet:
+        if depth_sensor.interface.pipeline.Filter.NOISE_REMOVAL in filters:
+            if self._noise_removal_filter is None:
+                self._noise_removal_filter = pyorbbecsdk.NoiseRemovalFilter()
+                params = pyorbbecsdk.OBNoiseRemovalFilterParams()
+                params.disp_diff = 256
+                params.max_size = 80
+                self._noise_removal_filter.set_filter_params(params)
+
+        if depth_sensor.interface.pipeline.Filter.TEMPORAL in filters:
+            if self._temporal_filter is None:
+                self._temporal_filter = pyorbbecsdk.TemporalFilter()
+                self._temporal_filter.set_diff_scale(0.1)
+                self._temporal_filter.set_weight(0.4)
+            frameset = self._temporal_filter.process(frameset)
+
+        if depth_sensor.interface.pipeline.Filter.SPATIAL in filters:
+            if self._spatial_filter is None:
+                self._spatial_filter = pyorbbecsdk.SpatialAdvancedFilter()
+                params = pyorbbecsdk.OBSpatialAdvancedFilterParams()
+                params.alpha = 0.5
+                params.disp_diff = 160
+                params.magnitude = 1
+                params.radius = 1
+                self._spatial_filter.set_filter_params(params)
+            frameset = self._spatial_filter.process(frameset)
+
+        if depth_sensor.interface.pipeline.Filter.ALIGN_D2C in filters:
+            if self._align_d2c_filter is None:
+                self._align_d2c_filter = pyorbbecsdk.AlignFilter(align_to_stream=pyorbbecsdk.OBStreamType.COLOR_STREAM)
+            frameset = self._align_d2c_filter.process(frameset)
+
+        return frameset.as_frame_set()
