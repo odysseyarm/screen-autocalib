@@ -32,13 +32,7 @@ class Pipeline(Protocol):
 
     def filter_supported(self, filter: Filter) -> bool:
         ...
-    
-    def get_stream_profile(self, steam: Stream) -> stream_profile.StreamProfile:
-        ...
 
-    def get_extrinsic_between(self, stream1: Stream, stream2: Stream) -> stream_profile.Extrinsic:
-        ...
-    
     def hdr_supported(self) -> bool:
         ...
 

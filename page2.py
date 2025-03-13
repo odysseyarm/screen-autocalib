@@ -1,7 +1,7 @@
 from typing import Callable, Optional
 import numpy as np
 import cv2
-from PySide6.QtCore import QTimer, Qt, QEvent
+from PySide6.QtCore import QTimer, Qt, QEvent, QThreadPool
 from PySide6.QtGui import QImage, QPixmap, QPen, QPainter, QPaintEvent, QResizeEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QHBoxLayout, QLabel
 from data_acquisition import DataAcquisitionThread
@@ -9,7 +9,7 @@ from depth_sensor.interface import frame, pipeline
 
 class MainWindow(QWidget):
     pipeline: Optional[pipeline.Pipeline]
-    pass
+    threadpool: QThreadPool
 
 class BracketOverlay(QWidget):
     def __init__(self, parent: QWidget) -> None:
@@ -113,9 +113,9 @@ class Page2(QWidget):
 
         assert self.pipeline is not None
 
-        self.data_thread = DataAcquisitionThread(self.pipeline)
-        self.data_thread.frame_processor.data_updated.connect(self.process_frame)
-        self.data_thread.start()
+        self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
+        self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
+        self.main_window.threadpool.start(self.data_thread)
 
         if self.auto_progress:
             self.start_countdown()
@@ -166,9 +166,8 @@ class Page2(QWidget):
         self.camera_pixmap_item.setPos(self.canvas.viewport().width() / 2, self.canvas.viewport().height() / 2)
 
     def stop_data_thread(self) -> None:
-        if self.data_thread and self.data_thread.isRunning():
+        if self.data_thread and self.data_thread.running:
             self.data_thread.stop()
-            self.data_thread.wait()
 
     def closeEvent(self, event: QEvent) -> None:
         self.stop_data_thread()

@@ -1,7 +1,9 @@
 from enum import Enum
 import sys
+from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QMessageBox
 from PySide6.QtGui import QScreen, QCloseEvent
+import pyorbbecsdk
 import pyrealsense2 as rs
 from page1 import Page1
 from page2 import Page2
@@ -18,7 +20,8 @@ import depth_sensor.realsense.pipeline
 import signal
 
 class MainWindow(QMainWindow):
-    pipeline: Optional[depth_sensor.interface.pipeline.Pipeline]
+    pipeline: depth_sensor.interface.pipeline.Pipeline
+    threadpool: QThreadPool
 
     def __init__(self, args: argparse.Namespace, screen: QScreen) -> None:
         self.args = args
@@ -42,10 +45,12 @@ class MainWindow(QMainWindow):
 
         self.calibration_data = CalibrationData()
 
+        self.threadpool = QThreadPool()
+
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress) # type: ignore
-        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, self.calibration_data, screen)
-        self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, self.calibration_data)
+        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, screen)
+        self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure)
         self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir, screen, args.screen_diagonal)
 
         self.stacked_widget.addWidget(self.page2)
@@ -64,11 +69,27 @@ class MainWindow(QMainWindow):
         # Initialize the pipeline
         match self.args.source:
             case DepthCameraSource.orbbec:
-                self.page3.needs_c2d = False
-                self.pipeline = depth_sensor.orbbec.pipeline.Pipeline()
+                config = pyorbbecsdk.Config()
+                ob_pipeline = pyorbbecsdk.Pipeline()
+
+                profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.COLOR_SENSOR)
+                _color_profile = profile_list.get_video_stream_profile(1920, 0, pyorbbecsdk.OBFormat.RGB, 30)
+
+                profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.IR_SENSOR)
+                _ir_profile = profile_list.get_video_stream_profile(1600, 0, pyorbbecsdk.OBFormat.Y8, 30)
+
+                profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.DEPTH_SENSOR)
+                _depth_profile = profile_list.get_video_stream_profile(1600, 0, pyorbbecsdk.OBFormat.Y16, 30)
+
+                config.enable_stream(_color_profile)
+                config.enable_stream(_ir_profile)
+                config.enable_stream(_depth_profile)
+
+                config.set_align_mode(pyorbbecsdk.OBAlignMode.SW_MODE)
+
+                self.pipeline = depth_sensor.orbbec.pipeline.Pipeline(ob_pipeline, config)
                 self.pipeline.start()
             case DepthCameraSource.realsense:
-                self.page3.needs_c2d = true
                 _pipeline = rs.pipeline()
                 config = rs.config()
 

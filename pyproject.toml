@@ -17,6 +17,7 @@ dependencies = [
     "pyrealsense2>=2.55.1.6486",
     "pyside6>=6.8.1.1",
     "returns>=0.24.0",
+    "scikit-learn>=1.6.1",
     "scikit-spatial>=8.1.0",
 ]
 

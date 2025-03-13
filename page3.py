@@ -2,7 +2,7 @@ import numpy as np
 import numpy.typing as npt
 import cv2
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QObject, QRunnable, QTimer, QThreadPool, Signal
 from PySide6.QtGui import QImage, QPixmap, QScreen
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
 from platformdirs import user_data_dir
@@ -28,6 +28,11 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
+class MainWindow(QWidget):
+    pipeline: Optional[depth_sensor.interface.pipeline.Pipeline]
+    calibration_data: CalibrationData
+    threadpool: QThreadPool
+
 def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: float) -> Dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]:
     points = dict[int, np.ndarray[Literal[2], np.dtype[np.float32]]]()
     id = 0
@@ -36,31 +41,6 @@ def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: f
             points[id] = np.array([x * square_length, y * square_length])
             id += 1
     return points
-
-# -1,-1 for unaligned corners
-def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame: depth_sensor.interface.frame.DepthFrame, raw_color_frame: depth_sensor.interface.frame.ColorFrame, pipeline: depth_sensor.interface.pipeline.Pipeline):
-    # Adapted from https://github.com/IntelRealSense/librealsense/issues/5603#issuecomment-574019008
-    depth_scale = depth_frame.get_depth_scale()
-    # idk what values make sense
-    depth_min = 0.11 #meter
-    depth_max = 8.0 #meter
-
-    depth_vsp = depth_frame.get_profile().as_video_stream_profile()
-    color_vsp = raw_color_frame.get_profile().as_video_stream_profile()
-    depth_intrin = depth_vsp.get_intrinsic()
-    color_intrin = color_vsp.get_intrinsic()
-
-    depth_to_color_extrin =  depth_vsp.get_extrinsic_to(raw_color_frame.get_profile().as_video_stream_profile())
-    color_to_depth_extrin =  color_vsp.get_extrinsic_to(depth_frame.get_profile().as_video_stream_profile())
-
-    aligned_corners = np.full_like(charuco_corners, np.nan)
-    for i, color_point in enumerate(charuco_corners):
-       aligned_corners[i] = rs.rs2_project_color_pixel_to_depth_pixel(
-                    depth_frame.get_data(), depth_scale,
-                    depth_min, depth_max,
-                    depth_intrin, color_intrin, color_to_depth_extrin, depth_to_color_extrin, color_point.ravel())
-
-    return aligned_corners
 
 def my_extract_3d_point(pixel: np.ndarray[Literal[2], np.dtype[np.int32]], intrins: depth_sensor.interface.stream_profile.CameraIntrinsic, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
     u, v = pixel.ravel()
@@ -88,8 +68,9 @@ def rs_extract_3d_point(charuco_corner: np.ndarray, rs_intrins: rs.intrinsics, d
 class Page3(QWidget):
     needs_c2d: bool
 
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[depth_sensor.interface.pipeline.Pipeline], auto_progress: bool, calibration_data: CalibrationData, screen: QScreen) -> None:
+    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: depth_sensor.interface.pipeline.Pipeline, auto_progress: bool, screen: QScreen) -> None:
         super().__init__(parent)
+        self.main_window = parent
         self.screen_size = screen.size()
         self.main_window_exit_application = exit_application
         self.motion_support = False
@@ -99,7 +80,6 @@ class Page3(QWidget):
         self.next_countdown_time = 5
         self.next_timer: Optional[QTimer] = None
         self.countdown_timer: Optional[QTimer] = None
-        self.latest_raw_color_frame: Optional[depth_sensor.interface.frame.ColorFrame] = None
         self.latest_color_frame: Optional[depth_sensor.interface.frame.ColorFrame] = None
         self.latest_depth_frame: Optional[depth_sensor.interface.frame.DepthFrame] = None
         self.madgwick = Madgwick(gain=0.5)
@@ -110,7 +90,6 @@ class Page3(QWidget):
         self.cols = 12
         self.rows = 7
         self.next_page = next_page
-        self.calibration_data = calibration_data
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -156,7 +135,7 @@ class Page3(QWidget):
     def start(self) -> None:
         if self.auto_progress:
             self.start_go_countdown()
-        self.start_data_acquisition()
+        self.start_data_thread()
 
     def start_go_countdown(self) -> None:
         """Start the countdown for the initial 'Go'."""
@@ -195,8 +174,8 @@ class Page3(QWidget):
                 self.exit_application()
     
     def go_next(self) -> None:
-        self.pipeline.stop()
-        self.data_thread.stop()
+        if self.data_thread is not None:
+            self.data_thread.stop()
         if self.next_timer is not None:
             self.next_timer.stop()
         self.next_page()
@@ -204,10 +183,372 @@ class Page3(QWidget):
     def resizeEvent(self, event: Any) -> None:
         self.create_charuco_board()
 
+    class BigHugeProcess(QRunnable):
+        from PySide6.QtCore import QSize
+
+        color_frame: Optional[depth_sensor.interface.frame.ColorFrame]
+        depth_frame = Optional[depth_sensor.interface.frame.DepthFrame]
+
+        cols: int
+        rows: int
+
+        screen_size: QSize
+
+        Q: np.ndarray[Literal[4], np.dtype[np.float32]]
+        motion_support: bool
+
+        class Signals(QObject):
+            def __init__(self):
+                super().__init__()
+            myFinished = Signal(bool, str, CalibrationData)
+        
+        signals: Signals
+
+        def __init__(self):
+            super().__init__()
+            self.signals = self.Signals()
+
+        def run(self):
+            calibration_data: CalibrationData = CalibrationData()
+
+            color_image = np.asanyarray(self.color_frame.get_data())
+
+            # ------------------------------
+            # Step 1. Detect the ChArUco board corners on the raw RGB image.
+            # ------------------------------
+            aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+            board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.03, aruco_dict)
+
+            detector_parameters = cv2.aruco.DetectorParameters()
+            charuco_parameters = cv2.aruco.CharucoParameters()
+            charuco_detector = cv2.aruco.CharucoDetector(board, charuco_parameters, detector_parameters)
+
+            gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+            charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
+            if charuco_ids is None:
+                self.signals.myFinished.emit(False, "No ChArUco board detected.", calibration_data)
+                return
+            
+            print("finished step 1/5")
+
+            # For visualization, draw the detected corners on the color image.
+            charuco_corners_depth_aligned = charuco_corners
+            cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners_depth_aligned, charuco_ids, cornerColor=(0, 0, 255))
+            calibration_data.color_image = color_image
+
+            # ------------------------------
+            # Step 2. Compute the expected board points and normalize them based on screen dimensions.
+            # ------------------------------
+            # Assume this function returns a dict mapping marker IDs to 2D board coordinates.
+            charuco_board_2d_points = define_charuco_board_2d_points((self.cols, self.rows), 1)
+
+            # Calculate scaling factors based on screen dimensions.
+            screen_width = self.screen_size.width()
+            screen_height = self.screen_size.height()
+
+            board_aspect_ratio = self.cols / self.rows
+            screen_aspect_ratio = screen_width / screen_height
+
+            board_width_in_pixels = screen_height * board_aspect_ratio
+            board_height_in_pixels = screen_width / board_aspect_ratio
+
+            if screen_aspect_ratio < board_aspect_ratio:
+                scale_x = 0
+                scale_y = (screen_height - board_height_in_pixels) / (board_height_in_pixels / self.rows)
+            else:
+                scale_x = (screen_width - board_width_in_pixels) / (board_width_in_pixels / self.cols)
+                scale_y = 0
+
+            # Normalize the expected board points to the unit square.
+            normalized_expected_board_points = {
+                id_: [
+                    (1 + point[0] + scale_x / 2) / (self.cols + scale_x),
+                    (1 + point[1] + scale_y / 2) / (self.rows + scale_y)
+                ]
+                for id_, point in charuco_board_2d_points.items()
+            }
+
+            # Build arrays for computing the initial homography from detected points to expected board coordinates.
+            detected_points = []
+            expected_points = []
+            for i, id_ in enumerate(charuco_ids):
+                if id_[0] in normalized_expected_board_points:
+                    if np.any(charuco_corners[i] == -1):
+                        continue
+                    detected_points.append(charuco_corners[i][0])
+                    expected_points.append(normalized_expected_board_points[id_[0]])
+            detected_points = np.array(detected_points, dtype=np.float32)
+            expected_points = np.array(expected_points, dtype=np.float32)
+            if len(detected_points) < 16:
+                self.signals.myFinished.emit(False, "Insufficient detected points.", calibration_data)
+                return
+            h_board, _ = cv2.findHomography(detected_points, expected_points)
+            if h_board is None:
+                self.signals.myFinished.emit(False, "Homography computation failed.", calibration_data)
+                return
+
+            print("finished step 2/5")
+            
+            # ------------------------------
+            # Step 3. Define the board region in the raw RGB image.
+            # ------------------------------
+            board_polygon_board = np.array([
+                [0.01, 0.01],
+                [0.99, 0.01],
+                [0.99, 0.99],
+                [0.01, 0.99],
+            ], dtype=np.float32)
+            h_board_inv = np.linalg.inv(h_board)
+            board_polygon_raw = cv2.perspectiveTransform(board_polygon_board.reshape(-1, 1, 2), h_board_inv)
+            board_polygon_raw = board_polygon_raw.astype(np.int32)
+
+            # Create a mask for the board region in the color_image.
+            board_mask = np.zeros(color_image.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(board_mask, [board_polygon_raw.reshape(-1, 2)], 255)
+
+            # self.page3.fail("debugging")
+            # # plot draw the color image and the mask
+            # plt.figure()
+            # plt.imshow(color_image)
+            # plt.plot(board_polygon_raw[:, 0, 0], board_polygon_raw[:, 0, 1], 'r-')
+            # plt.show()
+            # return
+
+            # ------------------------------
+            # Step 4. Generate a grid of points over the board region and align them to the depth frame.
+            # ------------------------------
+            ys, xs = np.where(board_mask > 0)
+            grid_points = np.vstack((xs, ys)).T.astype(np.float32)
+
+            aligned_grid_points = grid_points
+
+            # Filter out points that did not map correctly (marked as (-1, -1)).
+            valid_mask = (aligned_grid_points[:, 0] != -1) & (aligned_grid_points[:, 1] != -1)
+            valid_aligned_points = aligned_grid_points[valid_mask].astype(np.int32)
+
+            color_intrinsics = self.color_frame.get_profile().as_video_stream_profile().get_intrinsic()
+            c = color_intrinsics.dist_coeffs
+            rs_color_intrins = rs.intrinsics()
+            rs_color_intrins.fx, rs_color_intrins.fy, rs_color_intrins.height, rs_color_intrins.width = color_intrinsics.fx, color_intrinsics.fy, color_intrinsics.height, color_intrinsics.width
+            rs_color_intrins.ppx, rs_color_intrins.ppy = color_intrinsics.cx, color_intrinsics.cy
+            rs_color_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
+            match color_intrinsics.model:
+                case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
+                    rs_color_intrins.model = rs.distortion.inverse_brown_conrady
+                case depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
+                    rs_color_intrins.model = rs.distortion.brown_conrady
+                case _:
+                    raise ValueError("Distortion model not supported")
+
+            # ------------------------------
+            # Step 5. Gather 3D points from all valid depth pixels within the board region.
+            # ------------------------------
+            points_3d = []
+            for pt in valid_aligned_points:
+                x_d, y_d = pt
+
+                if x_d < 0 or x_d >= self.depth_frame.get_width() or y_d < 0 or y_d >= self.depth_frame.get_height():
+                    continue
+
+                if color_intrinsics.model == depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
+                    point_3d = my_extract_3d_point(pt, color_intrinsics, self.depth_frame)
+                else:
+                    point_3d = rs_extract_3d_point(pt, rs_color_intrins, self.depth_frame)
+                if point_3d is not None:
+                    points_3d.append(np.array(point_3d, dtype=np.float32))
+            points_3d = np.array(points_3d, dtype=np.float32)
+            if len(points_3d) == 0:
+                self.signals.myFinished.emit(False, "No valid depth points found in board region.", calibration_data)
+                return
+
+            print("finished step 3/5")
+
+            # # for debugging
+            # self.page3.fail("debugging")
+            # # display the point cloud of the board region
+            # plt.figure()
+            # ax = plt.axes(projection='3d')
+
+            # for i, point in enumerate(inlier_points):
+            # for i, point in enumerate(points_3d):
+            #      if i % 100 == 0:
+            #     ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
+
+            # plt.show()
+            # return
+
+            # Fit a plane using the custom plane_from_points function.
+            (plane, plane_rmse, plane_max_error, inlier_points) = plane_from_points(points_3d)
+            if plane is None:
+                self.signals.myFinished.emit(False, "Plane fitting failed", calibration_data)
+                return
+            calibration_data.plane = plane
+            calibration_data.plane_rmse = plane_rmse
+            calibration_data.plane_max_error = plane_max_error
+
+            print("RMSE of plane fit: ", plane_rmse)
+            print("Max error of plane fit: ", plane_max_error)
+
+            print("finished step 4/5")
+
+            # ------------------------------
+            # Step 6. Align the fitted plane with gravity.
+            # ------------------------------
+            Q = np.array(self.Q)
+            if self.motion_support:
+                swap_yz = np.array([
+                    [1, 0, 0],
+                    [0, 0, 1],
+                    [0, -1, 0],
+                ])
+                calibration_data.align_transform_mtx = (
+                    np.linalg.inv(swap_yz)
+                    @ quaternion.as_rotation_matrix(np.quaternion(*Q))
+                    @ swap_yz
+                )
+                align_transform_inv_mtx = np.linalg.inv(calibration_data.align_transform_mtx)
+            else:
+                calibration_data.align_transform_mtx = np.eye(3, dtype=np.float64)
+                align_transform_inv_mtx = np.eye(3, dtype=np.float64)
+
+            # Align the 3D points with gravity.
+            calibration_data.points_3d_aligned = [
+                calibration_data.align_transform_mtx @ point for point in inlier_points
+            ]
+            calibration_data.intrin = rs_color_intrins
+
+            # # for debugging
+            # self.page3.fail("debugging")
+            # # display the point cloud of the board region
+            # plt.figure()
+            # ax = plt.axes(projection='3d')
+
+            # # for i, point in enumerate(inlier_points):
+            # for i, point in enumerate(points_3d):
+            #     if i % 10 == 0:
+            #         ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
+
+            # centroid, normal = plane
+            # d = -np.dot(centroid, normal)
+            # xx, yy = np.meshgrid(np.linspace(-0.2, 0.2, 10), np.linspace(-0.2, 0.2, 10))
+            # zz = (-normal[0] * xx - normal[1] * yy - d) * 1. / normal[2]
+            # ax.plot_surface(xx, yy, zz, alpha=0.5)
+            # plt.show()
+            # return
+
+            # ------------------------------
+            # Step 7. Recompute a homography using deprojected board corners.
+            # ------------------------------
+            # For each detected board corner (from aligned charuco detection), approximate its intersection with the plane.
+            deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
+            detected_points_aligned_to_depth = detected_points
+            for pt in detected_points_aligned_to_depth:
+                deproj_pt = approximate_intersection(plane, calibration_data.intrin, pt[0], pt[1], 0, 1000)
+                if np.all(deproj_pt == 0):
+                    deprojected_points.append(np.array([np.NaN, np.NaN, np.NaN], dtype=np.float32))
+                else:
+                    deprojected_points.append(deproj_pt)
+
+            deprojected_points_aligned = [
+                calibration_data.align_transform_mtx @ point for point in deprojected_points
+            ]
+            deprojected_points_aligned = np.array(deprojected_points_aligned, dtype=np.float32)
+
+            # Rotate the plane to align with gravity for computing a 2D transformation.
+            plane_aligned = (
+                calibration_data.align_transform_mtx @ calibration_data.plane[0],
+                calibration_data.align_transform_mtx @ calibration_data.plane[1]
+            )
+            if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
+                self.page3.fail("Deprojected points are not distinct.")
+                self.page3.pipeline.start()
+                return
+
+            # Compute transformation matrix to flatten the plane to the XY plane.
+            calibration_data.xy_transformation_matrix_aligned = compute_xy_transformation_matrix(plane_aligned)
+            print("Transformation matrix (aligned): ", calibration_data.xy_transformation_matrix_aligned)
+
+            # Apply the transformation to the deprojected points.
+            transformed_points = apply_transformation(
+                deprojected_points_aligned,
+                calibration_data.xy_transformation_matrix_aligned
+            )
+
+            # todo tomorrow the transformed points wont always have the same shape because we remove invalids
+            # print(expected_points)
+            # print(transformed_points[:, :2])
+
+            expected_points_without_nan = expected_points[~np.isnan(transformed_points[:, 0])]
+            transformed_points_without_nan = transformed_points[~np.isnan(transformed_points[:, 0])]
+
+            # Compute the homography mapping expected board points to transformed deprojected points.
+            calibration_data.h_aligned, _ = cv2.findHomography(expected_points_without_nan, transformed_points_without_nan[:, :2])
+            if calibration_data.h_aligned is None:
+                print("Error: Homography could not be computed.")
+                return
+
+            print("Homography (aligned): ", calibration_data.h_aligned)
+
+            # ------------------------------
+            # Step 8. Map unit square corners and adjust offsets.
+            # ------------------------------
+            normalized_corners = np.array([
+                [0, 0],
+                [1, 0],
+                [1, 1],
+                [0, 1]
+            ], dtype=np.float32)
+            transformed_unit_square_2d_aligned = cv2.perspectiveTransform(
+                normalized_corners.reshape(-1, 1, 2),
+                calibration_data.h_aligned
+            )
+            offset_mtx = np.array([
+                [1, 0, -transformed_unit_square_2d_aligned[0][0][0]],
+                [0, 1, -transformed_unit_square_2d_aligned[0][0][1]],
+                [0, 0, 1]
+            ], dtype=np.float64)
+            offset_mtx_3d = np.array([
+                [1, 0, 0, -transformed_unit_square_2d_aligned[0][0][0]],
+                [0, 1, 0, -transformed_unit_square_2d_aligned[0][0][1]],
+                [0, 0, 1, 0],
+                [0, 0, 0, 1]
+            ], dtype=np.float64)
+            calibration_data.h_aligned = offset_mtx @ calibration_data.h_aligned
+            calibration_data.xy_transformation_matrix_aligned = offset_mtx_3d @ calibration_data.xy_transformation_matrix_aligned
+            transformed_unit_square_2d_aligned = cv2.perspectiveTransform(
+                normalized_corners.reshape(-1, 1, 2),
+                calibration_data.h_aligned
+            )
+
+            # ------------------------------
+            # Step 9. Compute the final 3D quadrilateral.
+            # ------------------------------
+            transformed_unit_square_3d_aligned = transformed_unit_square_2d_aligned.reshape(-1, 2)
+            transformed_unit_square_3d_aligned = np.hstack([
+                transformed_unit_square_3d_aligned,
+                np.zeros((4, 1), dtype=np.float32)
+            ])
+            calibration_data.best_quad_aligned = apply_transformation(
+                transformed_unit_square_3d_aligned,
+                np.linalg.inv(calibration_data.xy_transformation_matrix_aligned)
+            )
+            calibration_data.best_quad = [
+                align_transform_inv_mtx @ point for point in calibration_data.best_quad_aligned
+            ]
+            calibration_data.best_quad_2d = []
+            for point in calibration_data.best_quad:
+                point_2d = rs.rs2_project_point_to_pixel(calibration_data.intrin, point)
+                calibration_data.best_quad_2d.append(point_2d)
+            calibration_data.best_quad_2d = np.array(calibration_data.best_quad_2d, dtype=np.int32)
+
+            print("finished step 5/5")
+
+            self.signals.myFinished.emit(True, "", calibration_data)
+
     def on_go_clicked(self) -> None:
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
         self.label.showFullScreen()
-        QTimer.singleShot(3000, self.detect_charuco_corners)  # type: ignore
+        QTimer.singleShot(3000, self.run_big_huge_process)  # type: ignore
 
     def create_charuco_board(self) -> None:
         # Create the ChArUco board
@@ -224,7 +565,25 @@ class Page3(QWidget):
 
         self.label.setPixmap(pixmap)
 
-    def fail(self, msg: str) -> None:
+    def big_huge_process_finished(self, success: bool, err_msg: str, calibration_data: CalibrationData):
+        if success:
+            self.main_window.calibration_data = calibration_data
+
+            self.instructions_label.setText(f"Next in {self.next_countdown_time}")
+            self.next_button.setEnabled(True)
+            if self.auto_progress:
+                self.start_next_countdown(success=True)
+            self.label.hide()
+            self.stacked_layout.setCurrentWidget(self.initial_widget)
+
+            self.pipeline.start()
+            self.start_data_thread()
+        else:
+            self.pipeline.start()
+            self.start_data_thread()
+            self.fail(err_msg)
+
+    def fail(self, msg: Optional[str]) -> None:
         print(f"Detection failure: {msg}")
         self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.next_countdown_time}")
         if self.auto_progress:
@@ -232,383 +591,29 @@ class Page3(QWidget):
         self.label.hide()
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
-    def detect_charuco_corners(self) -> None:
-        raw_color_frame = self.latest_raw_color_frame
+    def run_big_huge_process(self) -> None:
         color_frame = self.latest_color_frame
         depth_frame = self.latest_depth_frame
 
-        if self.pipeline is None:
-            self.fail("Pipeline is None")
-            return
-        
-        if raw_color_frame is None or color_frame is None or depth_frame is None:
+        if color_frame is None or depth_frame is None:
             self.fail("No frames available for ChArUco board detection.")
             return
-        
+
         self.pipeline.stop()
         self.stop_data_thread()
 
-        raw_color_image = np.asanyarray(raw_color_frame.get_data())
-        color_image = np.asanyarray(color_frame.get_data())
+        big_huge_process = self.BigHugeProcess()
 
-        # ------------------------------
-        # Step 1. Detect the ChArUco board corners on the raw RGB image.
-        # ------------------------------
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-        board = cv2.aruco.CharucoBoard((self.cols, self.rows), 0.04, 0.03, aruco_dict)
+        big_huge_process.color_frame = color_frame
+        big_huge_process.depth_frame = depth_frame
+        big_huge_process.rows = self.rows
+        big_huge_process.cols = self.cols
+        big_huge_process.Q = self.Q
+        big_huge_process.motion_support = self.motion_support
+        big_huge_process.screen_size = self.screen_size
 
-        detector_parameters = cv2.aruco.DetectorParameters()
-        charuco_parameters = cv2.aruco.CharucoParameters()
-        charuco_detector = cv2.aruco.CharucoDetector(board, charuco_parameters, detector_parameters)
-
-        gray = cv2.cvtColor(raw_color_image, cv2.COLOR_BGR2GRAY)
-        charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
-        if charuco_ids is None:
-            self.fail("No ChArUco board detected.")
-            return
-        
-        print("finished step 1/5")
-
-        # For visualization, draw the detected corners on the color image.
-        if self.needs_c2d:
-            charuco_corners_depth_aligned = align_corners_to_depth(charuco_corners, depth_frame, raw_color_frame, self.pipeline)
-        else:
-            charuco_corners_depth_aligned = charuco_corners
-        cv2.aruco.drawDetectedCornersCharuco(color_image, charuco_corners_depth_aligned, charuco_ids, cornerColor=(0, 0, 255))
-        self.calibration_data.color_image = color_image
-
-        # ------------------------------
-        # Step 2. Compute the expected board points and normalize them based on screen dimensions.
-        # ------------------------------
-        # Assume this function returns a dict mapping marker IDs to 2D board coordinates.
-        charuco_board_2d_points = define_charuco_board_2d_points((self.cols, self.rows), 1)
-
-        # Calculate scaling factors based on screen dimensions.
-        screen_width = self.screen_size.width()
-        screen_height = self.screen_size.height()
-
-        board_aspect_ratio = self.cols / self.rows
-        screen_aspect_ratio = screen_width / screen_height
-
-        board_width_in_pixels = screen_height * board_aspect_ratio
-        board_height_in_pixels = screen_width / board_aspect_ratio
-
-        if screen_aspect_ratio < board_aspect_ratio:
-            scale_x = 0
-            scale_y = (screen_height - board_height_in_pixels) / (board_height_in_pixels / self.rows)
-        else:
-            scale_x = (screen_width - board_width_in_pixels) / (board_width_in_pixels / self.cols)
-            scale_y = 0
-
-        # Normalize the expected board points to the unit square.
-        normalized_expected_board_points = {
-            id_: [
-                (1 + point[0] + scale_x / 2) / (self.cols + scale_x),
-                (1 + point[1] + scale_y / 2) / (self.rows + scale_y)
-            ]
-            for id_, point in charuco_board_2d_points.items()
-        }
-
-        # Build arrays for computing the initial homography from detected points to expected board coordinates.
-        detected_points = []
-        expected_points = []
-        for i, id_ in enumerate(charuco_ids):
-            if id_[0] in normalized_expected_board_points:
-                if np.any(charuco_corners[i] == -1):
-                    continue
-                detected_points.append(charuco_corners[i][0])
-                expected_points.append(normalized_expected_board_points[id_[0]])
-        detected_points = np.array(detected_points, dtype=np.float32)
-        expected_points = np.array(expected_points, dtype=np.float32)
-        if len(detected_points) < 16:
-            self.fail("Insufficient detected points.")
-            self.pipeline.start()
-            self.start_data_acquisition()
-            return
-        h_board, _ = cv2.findHomography(detected_points, expected_points)
-        if h_board is None:
-            self.fail("Homography computation failed.")
-            self.pipeline.start()
-            self.start_data_acquisition()
-            return
-
-        print("finished step 2/5")
-        
-        # ------------------------------
-        # Step 3. Define the board region in the raw RGB image.
-        # ------------------------------
-        board_polygon_board = np.array([
-            [0.01, 0.01],
-            [0.99, 0.01],
-            [0.99, 0.99],
-            [0.01, 0.99],
-        ], dtype=np.float32)
-        h_board_inv = np.linalg.inv(h_board)
-        board_polygon_raw = cv2.perspectiveTransform(board_polygon_board.reshape(-1, 1, 2), h_board_inv)
-        board_polygon_raw = board_polygon_raw.astype(np.int32)
-
-        # Create a mask for the board region in the raw_color_image.
-        board_mask = np.zeros(raw_color_image.shape[:2], dtype=np.uint8)
-        cv2.fillPoly(board_mask, [board_polygon_raw.reshape(-1, 2)], 255)
-
-        # self.fail("debugging")
-        # # plot draw the color image and the mask
-        # plt.figure()
-        # plt.imshow(raw_color_image)
-        # plt.plot(board_polygon_raw[:, 0, 0], board_polygon_raw[:, 0, 1], 'r-')
-        # plt.show()
-        # return
-
-        # ------------------------------
-        # Step 4. Generate a grid of points over the board region and align them to the depth frame.
-        # ------------------------------
-        ys, xs = np.where(board_mask > 0)
-        grid_points = np.vstack((xs, ys)).T.astype(np.float32)
-
-        # Use align_corners_to_depth on the grid points.
-        if self.needs_c2d:
-            aligned_grid_points = align_corners_to_depth(grid_points, depth_frame, raw_color_frame, depth_sensor)
-        else:
-            aligned_grid_points = grid_points
-        # Filter out points that did not map correctly (marked as (-1, -1)).
-        valid_mask = (aligned_grid_points[:, 0] != -1) & (aligned_grid_points[:, 1] != -1)
-        valid_aligned_points = aligned_grid_points[valid_mask].astype(np.int32)
-
-        color_intrinsics = color_frame.get_profile().as_video_stream_profile().get_intrinsic()
-        c = color_intrinsics.dist_coeffs
-        rs_color_intrins = rs.intrinsics()
-        rs_color_intrins.fx, rs_color_intrins.fy, rs_color_intrins.height, rs_color_intrins.width = color_intrinsics.fx, color_intrinsics.fy, color_intrinsics.height, color_intrinsics.width
-        rs_color_intrins.ppx, rs_color_intrins.ppy = color_intrinsics.cx, color_intrinsics.cy
-        rs_color_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
-        match color_intrinsics.model:
-            case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
-                rs_color_intrins.model = rs.distortion.inverse_brown_conrady
-            case depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
-                rs_color_intrins.model = rs.distortion.brown_conrady
-            case _:
-                raise ValueError("Distortion model not supported")
-
-        # ------------------------------
-        # Step 5. Gather 3D points from all valid depth pixels within the board region.
-        # ------------------------------
-        points_3d = []
-        for pt in valid_aligned_points:
-            x_d, y_d = pt
-
-            if x_d < 0 or x_d >= depth_frame.get_width() or y_d < 0 or y_d >= depth_frame.get_height():
-                continue
-
-            if color_intrinsics.model == depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
-                point_3d = my_extract_3d_point(pt, color_intrinsics, depth_frame)
-            else:
-                point_3d = rs_extract_3d_point(pt, rs_color_intrins, depth_frame)
-            if point_3d is not None:
-                points_3d.append(np.array(point_3d, dtype=np.float32))
-        points_3d = np.array(points_3d, dtype=np.float32)
-        if len(points_3d) == 0:
-            self.fail("No valid depth points found in board region.")
-            self.pipeline.start()
-            self.start_data_acquisition()
-            return
-
-        print("finished step 3/5")
-
-        # # for debugging
-        # self.fail("debugging")
-        # # display the point cloud of the board region
-        # plt.figure()
-        # ax = plt.axes(projection='3d')
-
-        # for i, point in enumerate(inlier_points):
-        # for i, point in enumerate(points_3d):
-        #      if i % 100 == 0:
-        #     ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
-
-        # plt.show()
-        # return
-
-        # Fit a plane using the custom plane_from_points function.
-        (plane, plane_rmse, plane_max_error, inlier_points) = plane_from_points(points_3d)
-        if plane is None:
-            self.fail("Plane fitting failed")
-            self.pipeline.start()
-            self.start_data_acquisition()
-            return
-        self.calibration_data.plane = plane
-        self.calibration_data.plane_rmse = plane_rmse
-        self.calibration_data.plane_max_error = plane_max_error
-
-        print("RMSE of plane fit: ", plane_rmse)
-        print("Max error of plane fit: ", plane_max_error)
-
-        print("finished step 4/5")
-
-        # ------------------------------
-        # Step 6. Align the fitted plane with gravity.
-        # ------------------------------
-        Q = np.array(self.Q)
-        if self.motion_support:
-            swap_yz = np.array([
-                [1, 0, 0],
-                [0, 0, 1],
-                [0, -1, 0],
-            ])
-            self.calibration_data.align_transform_mtx = (
-                np.linalg.inv(swap_yz)
-                @ quaternion.as_rotation_matrix(np.quaternion(*Q))
-                @ swap_yz
-            )
-            align_transform_inv_mtx = np.linalg.inv(self.calibration_data.align_transform_mtx)
-        else:
-            self.calibration_data.align_transform_mtx = np.eye(3, dtype=np.float64)
-            align_transform_inv_mtx = np.eye(3, dtype=np.float64)
-
-        # Align the 3D points with gravity.
-        self.calibration_data.points_3d_aligned = [
-            self.calibration_data.align_transform_mtx @ point for point in inlier_points
-        ]
-        self.calibration_data.intrin = rs_color_intrins
-
-        # # for debugging
-        # self.fail("debugging")
-        # # display the point cloud of the board region
-        # plt.figure()
-        # ax = plt.axes(projection='3d')
-
-        # # for i, point in enumerate(inlier_points):
-        # for i, point in enumerate(points_3d):
-        #     if i % 10 == 0:
-        #         ax.scatter(point[0], point[1], point[2], c='b', marker='x', s=0.5)
-
-        # centroid, normal = plane
-        # d = -np.dot(centroid, normal)
-        # xx, yy = np.meshgrid(np.linspace(-0.2, 0.2, 10), np.linspace(-0.2, 0.2, 10))
-        # zz = (-normal[0] * xx - normal[1] * yy - d) * 1. / normal[2]
-        # ax.plot_surface(xx, yy, zz, alpha=0.5)
-        # plt.show()
-        # return
-
-        # ------------------------------
-        # Step 7. Recompute a homography using deprojected board corners.
-        # ------------------------------
-        # For each detected board corner (from aligned charuco detection), approximate its intersection with the plane.
-        deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
-        if self.needs_c2d:
-            detected_points_aligned_to_depth = align_corners_to_depth(detected_points, depth_frame, raw_color_frame, depth_sensor)
-        else:
-            detected_points_aligned_to_depth = detected_points
-        for pt in detected_points_aligned_to_depth:
-            deproj_pt = approximate_intersection(plane, self.calibration_data.intrin, pt[0], pt[1], 0, 1000)
-            if np.all(deproj_pt == 0):
-                deprojected_points.append(np.array([np.NaN, np.NaN, np.NaN], dtype=np.float32))
-            else:
-                deprojected_points.append(deproj_pt)
-
-        deprojected_points_aligned = [
-            self.calibration_data.align_transform_mtx @ point for point in deprojected_points
-        ]
-        deprojected_points_aligned = np.array(deprojected_points_aligned, dtype=np.float32)
-
-        # Rotate the plane to align with gravity for computing a 2D transformation.
-        plane_aligned = (
-            self.calibration_data.align_transform_mtx @ self.calibration_data.plane[0],
-            self.calibration_data.align_transform_mtx @ self.calibration_data.plane[1]
-        )
-        if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
-            self.fail("Deprojected points are not distinct.")
-            self.pipeline.start()
-            return
-
-        # Compute transformation matrix to flatten the plane to the XY plane.
-        self.calibration_data.xy_transformation_matrix_aligned = compute_xy_transformation_matrix(plane_aligned)
-        print("Transformation matrix (aligned): ", self.calibration_data.xy_transformation_matrix_aligned)
-
-        # Apply the transformation to the deprojected points.
-        transformed_points = apply_transformation(
-            deprojected_points_aligned,
-            self.calibration_data.xy_transformation_matrix_aligned
-        )
-
-        # todo tomorrow the transformed points wont always have the same shape because we remove invalids
-        # print(expected_points)
-        # print(transformed_points[:, :2])
-
-        expected_points_without_nan = expected_points[~np.isnan(transformed_points[:, 0])]
-        transformed_points_without_nan = transformed_points[~np.isnan(transformed_points[:, 0])]
-
-        # Compute the homography mapping expected board points to transformed deprojected points.
-        self.calibration_data.h_aligned, _ = cv2.findHomography(expected_points_without_nan, transformed_points_without_nan[:, :2])
-        if self.calibration_data.h_aligned is None:
-            print("Error: Homography could not be computed.")
-            return
-
-        print("Homography (aligned): ", self.calibration_data.h_aligned)
-
-        # ------------------------------
-        # Step 8. Map unit square corners and adjust offsets.
-        # ------------------------------
-        normalized_corners = np.array([
-            [0, 0],
-            [1, 0],
-            [1, 1],
-            [0, 1]
-        ], dtype=np.float32)
-        transformed_unit_square_2d_aligned = cv2.perspectiveTransform(
-            normalized_corners.reshape(-1, 1, 2),
-            self.calibration_data.h_aligned
-        )
-        offset_mtx = np.array([
-            [1, 0, -transformed_unit_square_2d_aligned[0][0][0]],
-            [0, 1, -transformed_unit_square_2d_aligned[0][0][1]],
-            [0, 0, 1]
-        ], dtype=np.float64)
-        offset_mtx_3d = np.array([
-            [1, 0, 0, -transformed_unit_square_2d_aligned[0][0][0]],
-            [0, 1, 0, -transformed_unit_square_2d_aligned[0][0][1]],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ], dtype=np.float64)
-        self.calibration_data.h_aligned = offset_mtx @ self.calibration_data.h_aligned
-        self.calibration_data.xy_transformation_matrix_aligned = offset_mtx_3d @ self.calibration_data.xy_transformation_matrix_aligned
-        transformed_unit_square_2d_aligned = cv2.perspectiveTransform(
-            normalized_corners.reshape(-1, 1, 2),
-            self.calibration_data.h_aligned
-        )
-
-        # ------------------------------
-        # Step 9. Compute the final 3D quadrilateral.
-        # ------------------------------
-        transformed_unit_square_3d_aligned = transformed_unit_square_2d_aligned.reshape(-1, 2)
-        transformed_unit_square_3d_aligned = np.hstack([
-            transformed_unit_square_3d_aligned,
-            np.zeros((4, 1), dtype=np.float32)
-        ])
-        self.calibration_data.best_quad_aligned = apply_transformation(
-            transformed_unit_square_3d_aligned,
-            np.linalg.inv(self.calibration_data.xy_transformation_matrix_aligned)
-        )
-        self.calibration_data.best_quad = [
-            align_transform_inv_mtx @ point for point in self.calibration_data.best_quad_aligned
-        ]
-        self.calibration_data.best_quad_2d = []
-        for point in self.calibration_data.best_quad:
-            point_2d = rs.rs2_project_point_to_pixel(self.calibration_data.intrin, point)
-            self.calibration_data.best_quad_2d.append(point_2d)
-        self.calibration_data.best_quad_2d = np.array(self.calibration_data.best_quad_2d, dtype=np.int32)
-
-        print("finished step 5/5")
-
-        # ------------------------------
-        # Step 10. Finalize: update UI and proceed.
-        # ------------------------------
-        self.instructions_label.setText(f"Next in {self.next_countdown_time}")
-        self.next_button.setEnabled(True)
-        if self.auto_progress:
-            self.start_next_countdown(success=True)
-        self.label.hide()
-        self.stacked_layout.setCurrentWidget(self.initial_widget)
-
-        self.pipeline.start()
+        big_huge_process.signals.myFinished.connect(self.big_huge_process_finished)
+        self.main_window.threadpool.start(big_huge_process)
 
     def process_frame(self, frames: depth_sensor.interface.frame.CompositeFrame) -> None:
         # frames = self.hdr_merge.process(frames)
@@ -629,7 +634,6 @@ class Page3(QWidget):
         #     if not color_frame:
         #         return
 
-        # self.latest_raw_color_frame = frames.get_color_frame()
         # self.latest_color_frame = color_frame
         # self.latest_depth_frame = depth_frame
 
@@ -640,21 +644,18 @@ class Page3(QWidget):
         #     # Update Madgwick filter
         #     # Swap coordinates because the Madgwick expects z to be gravity
         #     self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.z, -gyro_data.y], acc=[accel_data.x, accel_data.z, -accel_data.y])
-        self.latest_raw_color_frame = frames.get_color_frame()
         self.latest_color_frame = frames.get_color_frame()
         self.latest_depth_frame = frames.get_depth_frame()
 
-    def start_data_acquisition(self) -> None:
-        if self.pipeline:
-            self.data_thread = DataAcquisitionThread(self.pipeline)
-            self.data_thread.frame_processor.filters = ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.ALIGN_D2C
-            self.data_thread.frame_processor.data_updated.connect(self.process_frame)
-            self.data_thread.start()
+    def start_data_thread(self) -> None:
+        self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
+        self.data_thread.frame_processor.filters = ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.ALIGN_D2C
+        self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
+        self.main_window.threadpool.start(self.data_thread)
 
     def stop_data_thread(self) -> None:
-        if self.data_thread and self.data_thread.isRunning():
+        if self.data_thread and self.data_thread.running:
             self.data_thread.stop()
-            self.data_thread.wait()
 
     def closeEvent(self, event: Any) -> None:
         self.stop_data_thread()

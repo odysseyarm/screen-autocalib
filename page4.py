@@ -1,7 +1,7 @@
 import cv2
 import pyrealsense2 as rs
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
-from PySide6.QtCore import QTimer, Qt, QEvent
+from PySide6.QtCore import QTimer, Qt, QEvent, QThreadPool
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QHBoxLayout, QLabel
 from platformdirs import user_data_dir
@@ -13,8 +13,13 @@ import mathstuff
 from depth_sensor.interface import pipeline as ds_pipeline
 from depth_sensor.interface import frame as ds_frame
 
+class MainWindow(QWidget):
+    pipeline: Optional[ds_pipeline.Pipeline]
+    threadpool: QThreadPool
+    calibration_data: CalibrationData
+
 class Page4(QWidget):
-    def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: Optional[ds_pipeline.Pipeline], auto_progress: bool, ir_low_exposure: float, calibration_data: CalibrationData) -> None:
+    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: ds_pipeline.Pipeline, auto_progress: bool, ir_low_exposure: float) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.exit_application = exit_application
@@ -28,7 +33,6 @@ class Page4(QWidget):
         self.ir_low_exposure = ir_low_exposure
         self.remaining_time = 30
         self.next_page = next_page
-        self.calibration_data = calibration_data
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -109,17 +113,16 @@ class Page4(QWidget):
 
         # Find the expected ir marker locations
         normalized_marker_pattern = mathstuff.marker_pattern()
-        transformed_marker_pattern_3d_aligned = cv2.perspectiveTransform(normalized_marker_pattern.reshape(-1, 1, 2), self.calibration_data.h_aligned).reshape(-1, 2)
+        transformed_marker_pattern_3d_aligned = cv2.perspectiveTransform(normalized_marker_pattern.reshape(-1, 1, 2), self.main_window.calibration_data.h_aligned).reshape(-1, 2)
         transformed_marker_pattern_3d_aligned = cast(np.ndarray[Any, np.dtype[np.float32]], transformed_marker_pattern_3d_aligned)
         transformed_marker_pattern_3d_aligned = np.hstack([transformed_marker_pattern_3d_aligned, np.zeros((len(normalized_marker_pattern), 1), dtype=np.float32)])
-        expected_marker_pattern_aligned = mathstuff.apply_transformation(transformed_marker_pattern_3d_aligned, np.linalg.inv(self.calibration_data.xy_transformation_matrix_aligned))
+        expected_marker_pattern_aligned = mathstuff.apply_transformation(transformed_marker_pattern_3d_aligned, np.linalg.inv(self.main_window.calibration_data.xy_transformation_matrix_aligned))
 
         if len(detected_markers_2d) < len(expected_marker_pattern_aligned):
             print("Number of detected IR blobs is less than expected.")
             return False
 
-        if self.pipeline is not None:
-            self.pipeline.stop()
+        self.pipeline.stop()
         if self.data_thread is not None:
             self.data_thread.stop()
 
@@ -128,10 +131,10 @@ class Page4(QWidget):
         detected_markers_3d = []
         for point in detected_markers_2d:
             print(f"Approximating 3D position for IR blob at {point}")
-            point_3d = mathstuff.approximate_intersection(self.calibration_data.plane, self.calibration_data.intrin, point[0], point[1], 0, 1000)
+            point_3d = mathstuff.approximate_intersection(self.main_window.calibration_data.plane, self.main_window.calibration_data.intrin, point[0], point[1], 0, 1000)
             detected_markers_3d.append(point_3d)
         
-        detected_markers_3d_aligned = [self.calibration_data.align_transform_mtx @ point for point in detected_markers_3d]
+        detected_markers_3d_aligned = [self.main_window.calibration_data.align_transform_mtx @ point for point in detected_markers_3d]
 
         print("Finding closest detected blobs to expected positions...")
         # Find the closest detected blobs to the expected positions
@@ -145,11 +148,11 @@ class Page4(QWidget):
             detected_markers_3d_aligned.pop(closest_index)
             detected_markers_2d.pop(closest_index)
 
-        detected_marker_pattern_aligned_transformed = mathstuff.apply_transformation(np.array(detected_marker_pattern_aligned, dtype=np.float32), self.calibration_data.xy_transformation_matrix_aligned)
+        detected_marker_pattern_aligned_transformed = mathstuff.apply_transformation(np.array(detected_marker_pattern_aligned, dtype=np.float32), self.main_window.calibration_data.xy_transformation_matrix_aligned)
 
-        self.calibration_data.detected_marker_pattern_2d = detected_marker_pattern_2d
-        self.calibration_data.detected_marker_pattern_aligned = detected_marker_pattern_aligned
-        self.calibration_data.detected_marker_pattern_aligned_transformed = detected_marker_pattern_aligned_transformed
+        self.main_window.calibration_data.detected_marker_pattern_2d = detected_marker_pattern_2d
+        self.main_window.calibration_data.detected_marker_pattern_aligned = detected_marker_pattern_aligned
+        self.main_window.calibration_data.detected_marker_pattern_aligned_transformed = detected_marker_pattern_aligned_transformed
 
         return True
 
@@ -168,11 +171,10 @@ class Page4(QWidget):
         # else:
         #     depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
 
-        self.pipeline.start()
-        self.data_thread = DataAcquisitionThread(self.pipeline)
+        self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
         self.data_thread.frame_processor.filters = ds_pipeline.Filter.ALIGN_D2C
-        self.data_thread.frame_processor.data_updated.connect(self.process_frame)
-        self.data_thread.start()
+        self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
+        self.main_window.threadpool.start(self.data_thread)
 
         if self.auto_progress:
             self.start_countdown()
@@ -217,9 +219,8 @@ class Page4(QWidget):
         self.camera_pixmap_item.setPos(self.canvas.viewport().width() / 2, self.canvas.viewport().height() / 2)
 
     def stop_data_thread(self) -> None:
-        if self.data_thread and self.data_thread.isRunning():
+        if self.data_thread and self.data_thread.running:
             self.data_thread.stop()
-            self.data_thread.wait()
 
     def closeEvent(self, event: QEvent) -> None:
         self.stop_data_thread()

@@ -1,4 +1,4 @@
-from PySide6.QtCore import QThread, Signal, QObject
+from PySide6.QtCore import QRunnable, QThreadPool, Signal, QObject
 from typing import Optional, TypeVar
 import threading
 import time
@@ -12,8 +12,14 @@ import depth_sensor.orbbec
 import depth_sensor.orbbec.frame
 import depth_sensor.realsense
 
-class FrameProcessor(QThread):
-    data_updated = Signal(depth_sensor.interface.frame.CompositeFrame)  # Signal to emit updated frames
+class FrameProcessor(QRunnable):
+
+    class Signals(QObject):
+        def __init__(self):
+            super().__init__()
+        data_updated = Signal(depth_sensor.interface.frame.CompositeFrame)  # Signal to emit updated frames
+
+    signals = Signals()
     filters: Optional[depth_sensor.interface.pipeline.Filter] = None
 
     def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline):
@@ -33,9 +39,9 @@ class FrameProcessor(QThread):
                     else:
                         processed_frameset = self.latest_frameset
                     if isinstance(processed_frameset, pyorbbecsdk.FrameSet):
-                        self.data_updated.emit(depth_sensor.orbbec.frame.CompositeFrame(processed_frameset))
+                        self.signals.data_updated.emit(depth_sensor.orbbec.frame.CompositeFrame(processed_frameset))
                     else:
-                        self.data_updated.emit(depth_sensor.realsense.frame.CompositeFrame(processed_frameset))
+                        self.signals.data_updated.emit(depth_sensor.realsense.frame.CompositeFrame(processed_frameset))
                     self.latest_frameset = None
             time.sleep(0.001)
 
@@ -48,19 +54,21 @@ class FrameProcessor(QThread):
             self.running = False
             self.latest_frameset = None
 
-class DataAcquisitionThread(QThread):
+class DataAcquisitionThread(QRunnable):
+    threadpool: QThreadPool
     frame_processor: FrameProcessor
 
-    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline, parent: Optional[QObject] = None):
+    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline, threadpool: QThreadPool, parent: Optional[QObject] = None):
         super().__init__(parent)
         self.daemon = True
         self.pipeline = pipeline
+        self.threadpool = threadpool
         self.frame_processor = FrameProcessor(pipeline)
         self.running = False
 
     def run(self):
         self.running = True
-        self.frame_processor.start()
+        self.threadpool.start(self.frame_processor)
         while self.running:
             frames = self.pipeline.try_wait_for_frames()
             if frames is not None:
