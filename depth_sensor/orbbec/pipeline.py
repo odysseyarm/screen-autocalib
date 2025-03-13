@@ -92,7 +92,7 @@ class Pipeline:
     def hdr_supported(self) -> bool:
         return self._internal.get_device().is_property_supported(pyorbbecsdk.OBPropertyID.OB_STRUCT_DEPTH_HDR_CONFIG, pyorbbecsdk.OBPermissionType.PERMISSION_READ_WRITE)
 
-    def filters_process(self, frameset: pyorbbecsdk.FrameSet, filters: depth_sensor.interface.pipeline.Filter) -> pyorbbecsdk.FrameSet:
+    def filters_process(self, frameset: pyorbbecsdk.FrameSet, filters: depth_sensor.interface.pipeline.Filter) -> Optional[pyorbbecsdk.FrameSet]:
         if depth_sensor.interface.pipeline.Filter.NOISE_REMOVAL in filters:
             if self._noise_removal_filter is None:
                 self._noise_removal_filter = pyorbbecsdk.NoiseRemovalFilter()
@@ -124,4 +124,11 @@ class Pipeline:
                 self._align_d2c_filter = pyorbbecsdk.AlignFilter(align_to_stream=pyorbbecsdk.OBStreamType.COLOR_STREAM)
             frameset = self._align_d2c_filter.process(frameset)
 
-        return frameset.as_frame_set()
+        if frameset is None: # type: ignore
+            return None
+        
+        frameset = frameset.as_frame_set()
+        if frameset.get_color_frame() is None or frameset.get_ir_frame() is None: # type: ignore
+            return None
+
+        return frameset

@@ -118,6 +118,11 @@ class Page4(QWidget):
             print("Number of detected IR blobs is less than expected.")
             return False
 
+        if self.pipeline is not None:
+            self.pipeline.stop()
+        if self.data_thread is not None:
+            self.data_thread.stop()
+
         print(f"Detected {len(detected_markers_2d)} IR blobs, now approximating 3D positions...")
 
         detected_markers_3d = []
@@ -163,7 +168,9 @@ class Page4(QWidget):
         # else:
         #     depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
 
+        self.pipeline.start()
         self.data_thread = DataAcquisitionThread(self.pipeline)
+        self.data_thread.frame_processor.filters = ds_pipeline.Filter.ALIGN_D2C
         self.data_thread.frame_processor.data_updated.connect(self.process_frame)
         self.data_thread.start()
 

@@ -43,5 +43,5 @@ class Pipeline(Protocol):
         ...
 
     T=TypeVar("T", covariant=True, bound=(pyorbbecsdk.FrameSet|pyrealsense2.composite_frame))
-    def filters_process(self, frameset: T, filters: Filter) -> T:
+    def filters_process(self, frameset: T, filters: Filter) -> Optional[T]:
         ...

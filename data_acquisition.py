@@ -44,8 +44,9 @@ class FrameProcessor(QThread):
             self.latest_frameset = frameset
 
     def stop(self):
-        self.running = False
-        self.latest_frameset = None
+        with self.lock:
+            self.running = False
+            self.latest_frameset = None
 
 class DataAcquisitionThread(QThread):
     frame_processor: FrameProcessor

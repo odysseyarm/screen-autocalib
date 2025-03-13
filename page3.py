@@ -13,7 +13,7 @@ import quaternion
 from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
 import depth_sensor.interface.stream_profile
-from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern
+from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern, undistort_iterative_unproject
 from calibration_data import CalibrationData
 import depth_sensor.interface.pipeline
 import depth_sensor.interface.frame
@@ -62,14 +62,28 @@ def align_corners_to_depth(charuco_corners: np.ndarray, depth_frame: depth_senso
 
     return aligned_corners
 
-def extract_3d_point(charuco_corner: np.ndarray, rs_depth_intrins: rs.intrinsics, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
+def my_extract_3d_point(pixel: np.ndarray[Literal[2], np.dtype[np.int32]], intrins: depth_sensor.interface.stream_profile.CameraIntrinsic, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
+    u, v = pixel.ravel()
+    if u < 0 or v < 0:
+        return None
+    depth = depth_frame.get_distance(int(u), int(v))
+    if depth < 0.1 or depth > 10:
+        return None
+    ud_pixel = undistort_iterative_unproject(np.dtype(np.float32), intrins, pixel)
+    if ud_pixel is None:
+        return None
+    else:
+        x, y = ud_pixel.ravel()
+        return np.array([depth*x, depth*y, depth])
+
+def rs_extract_3d_point(charuco_corner: np.ndarray, rs_intrins: rs.intrinsics, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
     u, v = charuco_corner.ravel()
     if u < 0 or v < 0:
         return None
     depth = depth_frame.get_distance(int(u), int(v))
     if depth < 0.1 or depth > 10:
         return None
-    return np.array(rs.rs2_deproject_pixel_to_point(rs_depth_intrins, [u, v], depth), dtype=np.float32)
+    return np.array(rs.rs2_deproject_pixel_to_point(rs_intrins, [u, v], depth), dtype=np.float32)
 
 class Page3(QWidget):
     needs_c2d: bool
@@ -91,10 +105,10 @@ class Page3(QWidget):
         self.madgwick = Madgwick(gain=0.5)
         self.Q = np.array([1.0, 0.0, 0.0, 0.0])
         self.data_thread: Optional[DataAcquisitionThread] = None
-        self.cols = 30
-        self.rows = 16
-        # self.cols = 12
-        # self.rows = 7
+        # self.cols = 30
+        # self.rows = 16
+        self.cols = 12
+        self.rows = 7
         self.next_page = next_page
         self.calibration_data = calibration_data
         self.init_ui()
@@ -181,6 +195,8 @@ class Page3(QWidget):
                 self.exit_application()
     
     def go_next(self) -> None:
+        self.pipeline.stop()
+        self.data_thread.stop()
         if self.next_timer is not None:
             self.next_timer.stop()
         self.next_page()
@@ -325,7 +341,7 @@ class Page3(QWidget):
             [0.01, 0.01],
             [0.99, 0.01],
             [0.99, 0.99],
-            [0.01, 0.99]
+            [0.01, 0.99],
         ], dtype=np.float32)
         h_board_inv = np.linalg.inv(h_board)
         board_polygon_raw = cv2.perspectiveTransform(board_polygon_board.reshape(-1, 1, 2), h_board_inv)
@@ -358,17 +374,17 @@ class Page3(QWidget):
         valid_mask = (aligned_grid_points[:, 0] != -1) & (aligned_grid_points[:, 1] != -1)
         valid_aligned_points = aligned_grid_points[valid_mask].astype(np.int32)
 
-        depth_intrinsics = depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
-        c = depth_intrinsics.dist_coeffs
-        rs_depth_intrins = rs.intrinsics()
-        rs_depth_intrins.fx, rs_depth_intrins.fy, rs_depth_intrins.height, rs_depth_intrins.width = depth_intrinsics.fx, depth_intrinsics.fy, depth_intrinsics.height, depth_intrinsics.width
-        rs_depth_intrins.ppx, rs_depth_intrins.ppy = depth_intrinsics.cx, depth_intrinsics.cy
-        rs_depth_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
-        match depth_intrinsics.model:
+        color_intrinsics = color_frame.get_profile().as_video_stream_profile().get_intrinsic()
+        c = color_intrinsics.dist_coeffs
+        rs_color_intrins = rs.intrinsics()
+        rs_color_intrins.fx, rs_color_intrins.fy, rs_color_intrins.height, rs_color_intrins.width = color_intrinsics.fx, color_intrinsics.fy, color_intrinsics.height, color_intrinsics.width
+        rs_color_intrins.ppx, rs_color_intrins.ppy = color_intrinsics.cx, color_intrinsics.cy
+        rs_color_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
+        match color_intrinsics.model:
             case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
-                rs_depth_intrins.model = rs.distortion.inverse_brown_conrady
+                rs_color_intrins.model = rs.distortion.inverse_brown_conrady
             case depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
-                rs_depth_intrins.model = rs.distortion.brown_conrady
+                rs_color_intrins.model = rs.distortion.brown_conrady
             case _:
                 raise ValueError("Distortion model not supported")
 
@@ -382,10 +398,13 @@ class Page3(QWidget):
             if x_d < 0 or x_d >= depth_frame.get_width() or y_d < 0 or y_d >= depth_frame.get_height():
                 continue
 
-            point_3d = extract_3d_point(pt, rs_depth_intrins, depth_frame)
+            if color_intrinsics.model == depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
+                point_3d = my_extract_3d_point(pt, color_intrinsics, depth_frame)
+            else:
+                point_3d = rs_extract_3d_point(pt, rs_color_intrins, depth_frame)
             if point_3d is not None:
                 points_3d.append(np.array(point_3d, dtype=np.float32))
-        points_3d = np.array(points_3d)
+        points_3d = np.array(points_3d, dtype=np.float32)
         if len(points_3d) == 0:
             self.fail("No valid depth points found in board region.")
             self.pipeline.start()
@@ -394,11 +413,11 @@ class Page3(QWidget):
 
         print("finished step 3/5")
 
-        # for debugging
-        self.fail("debugging")
-        # display the point cloud of the board region
-        plt.figure()
-        ax = plt.axes(projection='3d')
+        # # for debugging
+        # self.fail("debugging")
+        # # display the point cloud of the board region
+        # plt.figure()
+        # ax = plt.axes(projection='3d')
 
         # for i, point in enumerate(inlier_points):
         # for i, point in enumerate(points_3d):
@@ -448,7 +467,7 @@ class Page3(QWidget):
         self.calibration_data.points_3d_aligned = [
             self.calibration_data.align_transform_mtx @ point for point in inlier_points
         ]
-        self.calibration_data.intrin = rs_depth_intrins
+        self.calibration_data.intrin = rs_color_intrins
 
         # # for debugging
         # self.fail("debugging")

@@ -9,14 +9,14 @@ class DistortionModel(enum.Enum):
     INV_BROWN_CONRADY = 1,
 
 class CameraDistortion:
-    k1: float
-    k2: float
-    k3: float
-    k4: float
-    k5: float
-    k6: float
-    p1: float
-    p2: float
+    k1: numpy.float32
+    k2: numpy.float32
+    k3: numpy.float32
+    k4: numpy.float32
+    k5: numpy.float32
+    k6: numpy.float32
+    p1: numpy.float32
+    p2: numpy.float32
 
     def __str__(self):
         return (f"CameraDistortion(k1={self.k1}, k2={self.k2}, k3={self.k3}, "
@@ -24,10 +24,10 @@ class CameraDistortion:
 
 class CameraIntrinsic:
     dist_coeffs: CameraDistortion
-    cx: float
-    cy: float
-    fx: float
-    fy: float
+    cx: numpy.float32
+    cy: numpy.float32
+    fx: numpy.float32
+    fy: numpy.float32
     height: int
     width: int
     model: DistortionModel

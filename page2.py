@@ -136,6 +136,8 @@ class Page2(QWidget):
     def go_next(self) -> None:
         if self.countdown_timer is not None:
             self.countdown_timer.stop()
+        if self.data_thread is not None:
+            self.data_thread.stop()
         self.next_page()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
