@@ -55,10 +55,16 @@ class ColorFrame:
     def get_profile(self) -> stream_profile.StreamProfile:
         return stream_profile.StreamProfile(self._internal.get_stream_profile())
 
+    def get_width(self) -> int:
+        return self._internal.get_width()
+
+    def get_height(self) -> int:
+        return self._internal.get_height()
+
 class IRFrame:
     _internal: pyorbbecsdk.VideoFrame
     _reshaped: npt.NDArray[np.uint8|np.uint16]
-    _converted: cv2.typing.MatLike = None
+    _converted: Optional[cv2.typing.MatLike] = None
 
     def __init__(self, frame: pyorbbecsdk.VideoFrame):
         self._internal = frame
@@ -110,6 +116,12 @@ class IRFrame:
     def get_profile(self) -> stream_profile.StreamProfile:
         return stream_profile.StreamProfile(self._internal.get_stream_profile())
 
+    def get_width(self) -> int:
+        return self._internal.get_width()
+
+    def get_height(self) -> int:
+        return self._internal.get_height()
+
 class DepthFrame:
     _internal: pyorbbecsdk.DepthFrame
     _reshaped: npt.NDArray[np.uint16]
@@ -121,9 +133,6 @@ class DepthFrame:
     def get_data(self) -> npt.NDArray[np.uint16]:
         return self._reshaped
 
-    def get_depth_scale(self) -> float:
-        return self._internal.get_depth_scale()
-
     def get_distance(self, x: int, y: int) -> float:
         # meters
         ret = self._internal.get_depth_scale() * 0.001 * self.get_data()[y, x]
@@ -131,7 +140,7 @@ class DepthFrame:
 
     def get_profile(self) -> stream_profile.StreamProfile:
         return stream_profile.StreamProfile(self._internal.get_stream_profile())
-    
+
     def get_width(self) -> int:
         return self._internal.get_width()
 

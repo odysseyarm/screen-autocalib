@@ -1,6 +1,5 @@
 import pyorbbecsdk
 
-from . import stream_profile
 import depth_sensor.interface.frame
 import depth_sensor.interface.pipeline
 import depth_sensor.interface.stream_profile
@@ -9,10 +8,6 @@ from typing import Optional
 
 class Pipeline:
     _internal: pyorbbecsdk.Pipeline
-
-    _color_profile: pyorbbecsdk.VideoStreamProfile
-    _depth_profile: pyorbbecsdk.VideoStreamProfile
-    _ir_profile: pyorbbecsdk.VideoStreamProfile
 
     _noise_removal_filter: Optional[pyorbbecsdk.NoiseRemovalFilter] = None
     _temporal_filter: Optional[pyorbbecsdk.TemporalFilter] = None
