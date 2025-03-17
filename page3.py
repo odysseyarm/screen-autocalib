@@ -326,12 +326,12 @@ class Page3(QWidget):
             valid_mask = (aligned_grid_points[:, 0] != -1) & (aligned_grid_points[:, 1] != -1)
             valid_aligned_points = aligned_grid_points[valid_mask].astype(np.int32)
 
-            depth_intrinsics = self.depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
-            c = depth_intrinsics.dist_coeffs
-            rs_depth_intrins = rs.intrinsics()
-            rs_depth_intrins.fx, rs_depth_intrins.fy, rs_depth_intrins.height, rs_depth_intrins.width = depth_intrinsics.fx, depth_intrinsics.fy, depth_intrinsics.height, depth_intrinsics.width
-            rs_depth_intrins.ppx, rs_depth_intrins.ppy = depth_intrinsics.cx, depth_intrinsics.cy
-            rs_depth_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
+            # depth_intrinsics = self.depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
+            # c = depth_intrinsics.dist_coeffs
+            # rs_depth_intrins = rs.intrinsics()
+            # rs_depth_intrins.fx, rs_depth_intrins.fy, rs_depth_intrins.height, rs_depth_intrins.width = depth_intrinsics.fx, depth_intrinsics.fy, depth_intrinsics.height, depth_intrinsics.width
+            # rs_depth_intrins.ppx, rs_depth_intrins.ppy = depth_intrinsics.cx, depth_intrinsics.cy
+            # rs_depth_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
 
             color_intrinsics = self.depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
             c = color_intrinsics.dist_coeffs
@@ -340,11 +340,11 @@ class Page3(QWidget):
             rs_color_intrins.ppx, rs_color_intrins.ppy = color_intrinsics.cx, color_intrinsics.cy
             rs_color_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
 
-            match depth_intrinsics.model:
+            match color_intrinsics.model:
                 case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
-                    rs_depth_intrins.model = rs.distortion.inverse_brown_conrady
+                    rs_color_intrins.model = rs.distortion.inverse_brown_conrady
                 case depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
-                    rs_depth_intrins.model = rs.distortion.brown_conrady
+                    rs_color_intrins.model = rs.distortion.brown_conrady
                 case _:
                     raise ValueError("Distortion model not supported")
 
@@ -358,10 +358,10 @@ class Page3(QWidget):
                 if x_d < 0 or x_d >= self.depth_frame.get_width() or y_d < 0 or y_d >= self.depth_frame.get_height():
                     continue
 
-                if depth_intrinsics.model == depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
-                    point_3d = my_extract_3d_point(pt, depth_intrinsics, self.depth_frame)
+                if color_intrinsics.model == depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
+                    point_3d = my_extract_3d_point(pt, color_intrinsics, self.depth_frame)
                 else:
-                    point_3d = rs_extract_3d_point(pt, rs_depth_intrins, self.depth_frame)
+                    point_3d = rs_extract_3d_point(pt, rs_color_intrins, self.depth_frame)
                 if point_3d is not None:
                     points_3d.append(np.array(point_3d, dtype=np.float32))
             points_3d = np.array(points_3d, dtype=np.float32)
@@ -423,7 +423,7 @@ class Page3(QWidget):
             calibration_data.points_3d_aligned = [
                 calibration_data.align_transform_mtx @ point for point in inlier_points
             ]
-            calibration_data.intrin = rs_depth_intrins
+            calibration_data.intrin = rs_color_intrins
 
             # # for debugging
             # self.page3.fail("debugging")
@@ -451,7 +451,7 @@ class Page3(QWidget):
             deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
             detected_points_aligned_to_depth = detected_points
             for pt in detected_points_aligned_to_depth:
-                deproj_pt = approximate_intersection(plane, rs_depth_intrins, pt[0], pt[1], 0, 1000)
+                deproj_pt = approximate_intersection(plane, rs_color_intrins, pt[0], pt[1], 0, 1000)
                 if np.all(deproj_pt == 0):
                     deprojected_points.append(np.array([np.NaN, np.NaN, np.NaN], dtype=np.float32))
                 else:
