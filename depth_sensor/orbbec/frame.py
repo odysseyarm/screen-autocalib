@@ -146,6 +146,12 @@ class DepthFrame:
 
     def get_height(self) -> int:
         return self._internal.get_height()
+    
+    def get_format(self) -> depth_sensor.interface.frame.StreamFormat:
+        raise NotImplementedError
+    
+    def set_format(self, format: depth_sensor.interface.frame.StreamFormat) -> None:
+        raise NotImplementedError
 
 class CompositeFrame:
     _internal: pyorbbecsdk.FrameSet

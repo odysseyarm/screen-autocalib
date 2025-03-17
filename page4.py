@@ -130,7 +130,7 @@ class Page4(QWidget):
 
         detected_markers_3d = []
         for point in detected_markers_2d:
-            print(f"Approximating 3D position for IR blob at {point}")
+            # print(f"Approximating 3D position for IR blob at {point}")
             point_3d = mathstuff.approximate_intersection(self.main_window.calibration_data.plane, self.main_window.calibration_data.intrin, point[0], point[1], 0, 1000)
             detected_markers_3d.append(point_3d)
         
