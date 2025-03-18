@@ -16,10 +16,10 @@ class ColorFrame:
     def get_data(self) -> npt.ArrayLike:
         frame: npt.ArrayLike
         if self._converted is None:
-            frame = np.asanyarray(self._internal)
+            frame = np.reshape(self._internal.get_data(), (self._internal.get_height(), self._internal.get_width(), 3)) # type: ignore
         else:
             frame = self._converted
-        return frame
+        return frame # type: ignore
 
     def get_format(self) -> depth_sensor.interface.frame.StreamFormat:
         match self._internal.get_profile().format:
@@ -37,7 +37,7 @@ class ColorFrame:
     def set_format(self, format: depth_sensor.interface.frame.StreamFormat) -> None:
         match format:
             case depth_sensor.interface.frame.StreamFormat.RGB:
-                self._converted = np.asanyarray(self._internal)
+                self._converted = None
             case depth_sensor.interface.frame.StreamFormat.BGR:
                 self._converted = cv2.cvtColor(np.asanyarray(self._internal.get_data()), cv2.COLOR_RGB2BGR)
             case depth_sensor.interface.frame.StreamFormat.Z16:
@@ -79,10 +79,7 @@ class IRFrame:
                 ir_data = np.reshape(ir_data, (frame.get_height(), frame.get_width()))
                 max_data = 255
             case _:
-                data_type = np.uint16
-                image_dtype = cv2.CV_16UC1
-                ir_data = np.frombuffer(ir_data, dtype=np.uint16) # type: ignore
-                max_data = 65535
+                raise ValueError("Unsupported")
         cv2.normalize(ir_data, ir_data, 0, max_data, cv2.NORM_MINMAX, dtype=image_dtype)
         self._reshaped = ir_data.astype(data_type)
 
@@ -93,7 +90,7 @@ class IRFrame:
             return self._converted
 
     def get_format(self) -> depth_sensor.interface.frame.StreamFormat:
-        match self._internal.get_profile().format:
+        match self._internal.get_profile().format():
             case pyrealsense2.format.y8:
                 return depth_sensor.interface.frame.StreamFormat.Y8
             case pyrealsense2.format.mjpeg:
@@ -128,9 +125,9 @@ class DepthFrame:
     def get_data(self) -> npt.NDArray[np.uint16]:
         return self._reshaped
 
-    def get_distance(self, x: int, y: int) -> float:
+    def get_distance(self, x: int, y: int) -> np.float32:
         # meters
-        return self._internal.get_distance(x, y) * 0.001
+        return np.float32(self._internal.get_distance(x, y))
 
     def get_profile(self) -> stream_profile.StreamProfile:
         return stream_profile.StreamProfile(self._internal.get_profile())

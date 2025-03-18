@@ -131,7 +131,7 @@ class Page4(QWidget):
         detected_markers_3d = []
         for point in detected_markers_2d:
             # print(f"Approximating 3D position for IR blob at {point}")
-            point_3d = mathstuff.approximate_intersection(self.main_window.calibration_data.plane, self.main_window.calibration_data.intrin, point[0], point[1], 0, 1000)
+            point_3d = mathstuff.approximate_intersection(self.main_window.calibration_data.plane, ir_frame.get_profile().as_video_stream_profile().get_intrinsic(), point[0], point[1], 0, 1000)
             detected_markers_3d.append(point_3d)
         
         detected_markers_3d_aligned = [self.main_window.calibration_data.align_transform_mtx @ point for point in detected_markers_3d]
@@ -172,7 +172,7 @@ class Page4(QWidget):
         #     depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
 
         self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
-        self.data_thread.frame_processor.filters = ds_pipeline.Filter.ALIGN_D2C
+        self.data_thread.frame_processor.filters = None
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
         self.main_window.threadpool.start(self.data_thread)
 

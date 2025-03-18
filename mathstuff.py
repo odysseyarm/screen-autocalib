@@ -3,7 +3,8 @@ import numpy.typing as npt
 import quaternion
 import pyrealsense2 as rs
 from typing import Any, List, Literal, Optional, Tuple, cast, TypeVar
-from depth_sensor.interface.stream_profile import CameraIntrinsic, CameraDistortion
+from depth_sensor.interface.stream_profile import CameraIntrinsic, CameraDistortion, DistortionModel, Extrinsic
+from depth_sensor.interface.frame import DepthFrame
 
 from skspatial.objects import Plane
 from sklearn.linear_model import RANSACRegressor
@@ -97,7 +98,7 @@ def plane_from_points(
     
     return (centroid, normal), rmse, max_error, inliers
 
-def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.float32], np.ndarray[Literal[3], np.float32]]) -> np.ndarray[Literal[4, 4], np.float64]:
+def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.float32], np.ndarray[Literal[3], np.float32]]) -> np.ndarray[Literal[4, 4], np.float32]:
     point, normal = plane
 
     # Normalize the normal vector
@@ -113,11 +114,11 @@ def compute_xy_transformation_matrix(plane: Tuple[np.ndarray[Literal[3], np.floa
     y /= np.linalg.norm(y)
 
     # Construct the rotation matrix (column-major)
-    rotation_matrix = np.eye(4, dtype=np.float64)
-    rotation_matrix[:3, :3] = np.array([x, y, z], dtype=np.float64)
+    rotation_matrix = np.eye(4, dtype=np.float32)
+    rotation_matrix[:3, :3] = np.array([x, y, z], dtype=np.float32)
 
     # Construct the translation matrix (column-major)
-    translation_matrix = np.eye(4, dtype=np.float64)
+    translation_matrix = np.eye(4, dtype=np.float32)
     translation_matrix[:3, 3] = -point
 
     # Combine translation and rotation to form the transformation matrix
@@ -156,8 +157,9 @@ def evaluate_plane(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np
     return np.dot(normal, point - centroid)
 
 def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-12):
-    def deproject(x, y, z):
-        return np.array(rs.rs2_deproject_pixel_to_point(intrin, [x, y], z))
+    def deproject(x, y, d):
+        pt = undistort_deproject(np.float32, intrin, np.array([x, y]))
+        return np.array([pt[0], pt[1], 1]) * d
     
     min_point = deproject(x, y, min_z)
     max_point = deproject(x, y, max_z)
@@ -186,17 +188,17 @@ def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.flo
 
     return deproject(x, y, (min_z + max_z) / 2)
 
-def calculate_gravity_alignment_matrix(gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]) -> np.ndarray[Tuple[Literal[3], Literal[3]], np.dtype[np.float64]]:
+def calculate_gravity_alignment_matrix(gravity_vector: np.ndarray[Tuple[Literal[3]], np.dtype[np.float32]]) -> np.ndarray[Tuple[Literal[3], Literal[3]], np.dtype[np.float32]]:
     """
     Create a rotation matrix to align Y-axis with the gravity vector.
 
     Parameters:
-    gravity_vector (np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]): Gravity vector
+    gravity_vector (np.ndarray[Tuple[Literal[3]], np.dtype[np.float32]]): Gravity vector
 
     Returns:
-    np.ndarray[Tuple[Literal[3], Literal[3]], np.dtype[np.float64]]: Rotation matrix
+    np.ndarray[Tuple[Literal[3], Literal[3]], np.dtype[np.float32]]: Rotation matrix
     """
-    y_axis = np.array([0, 1, 0], dtype=np.float64)
+    y_axis = np.array([0, 1, 0], dtype=np.float32)
     gravity_vector = gravity_vector / np.linalg.norm(gravity_vector)
     rotation_axis = np.cross(y_axis, gravity_vector)
     rotation_axis /= np.linalg.norm(rotation_axis)
@@ -213,70 +215,174 @@ import numpy as np
 from depth_sensor.interface.stream_profile import CameraIntrinsic, CameraDistortion
 
 F = TypeVar("F", bound=np.float32|np.float64)
-def undistort_iterative_unproject(type: np.dtype[F], intrinsic: CameraIntrinsic, pixel: np.ndarray[Literal[2], np.dtype[np.int32]]) -> Optional[np.ndarray[Literal[2], np.dtype[F]]]:
-    # Cast the pixel coordinates to the floating type F
-    pixel_f = pixel.astype(np.float32)  # or np.float64, depending on F
+def undistort_deproject(
+    _: np.dtype[F], intrinsic: CameraIntrinsic, pixel: np.ndarray[Literal[2], np.dtype[F]]
+) -> Optional[np.ndarray[Literal[2], np.dtype[F]]]:
+    """
+    Undistorts a pixel coordinate and deprojects it to normalized (x, y) camera space.
+    
+    - Uses **direct** computation for Inverse Brown-Conrady.
+    - Uses **iterative** refinement for Brown-Conrady.
+    
+    Returns normalized (x, y) coordinates if successful, otherwise None.
+    """
 
-    # Normalize pixel coordinates.
-    xd: F = (pixel_f[0] - intrinsic.cx) / intrinsic.fx
-    yd: F = (pixel_f[1] - intrinsic.cy) / intrinsic.fy
+    # Normalize pixel coordinates
+    xd: F = (pixel[0] - intrinsic.cx) / intrinsic.fx
+    yd: F = (pixel[1] - intrinsic.cy) / intrinsic.fy
 
-    # Initialize with normalized coordinates.
-    x: F = xd
-    y: F = yd
-    best_err: F = 99999  # A large initial error.
-
-    # Use the distortion coefficients from the intrinsic parameters.
     disto: CameraDistortion = intrinsic.dist_coeffs
 
-    # Iterative refinement (up to 40 iterations).
-    for _ in range(40):
-        r2: F = x * x + y * y
+    if intrinsic.model == DistortionModel.INV_BROWN_CONRADY:
+        # **Inverse Brown-Conrady (Direct Computation)**
+        r2: F = xd * xd + yd * yd
         r4: F = r2 * r2
         r6: F = r4 * r2
         
-        # Compute the inverse radial distortion factor.
-        kr_inv: F = (1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6) / (1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6)
-        
-        # Compute tangential distortion corrections.
-        dx: F = disto.p1 * 2 * x * y + disto.p2 * (r2 + 2 * x * x)
-        dy: F = disto.p2 * 2 * x * y + disto.p1 * (r2 + 2 * y * y)
-        
-        # Update the distortion-free coordinates.
-        x = (xd - dx) * kr_inv
-        y = (yd - dy) * kr_inv
+        kr: F = 1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6  # Inverse Brown-Conrady correction factor
 
-        # Re-apply the distortion model for error evaluation.
-        r2 = x * x + y * y
-        r4 = r2 * r2
-        r6 = r4 * r2
-        a1: F = 2 * x * y
-        a2: F = r2 + 2 * x * x
-        a3: F = r2 + 2 * y * y
-        
-        cdist: F = (1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6) / (1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6)
-        xd0: F = x * cdist + disto.p1 * a1 + disto.p2 * a2
-        yd0: F = y * cdist + disto.p1 * a3 + disto.p2 * a1
-        
-        # Re-project to pixel coordinates.
-        x_proj: F = xd0 * intrinsic.fx + intrinsic.cx
-        y_proj: F = yd0 * intrinsic.fy + intrinsic.cy
-        
-        error: F = np.sqrt((x_proj - pixel_f[0])**2 + (y_proj - pixel_f[1])**2)
-        
-        if error > best_err:
-            break
-        
-        best_err = error
-        
-        if error < 0.01:
-            break
+        x = xd / kr
+        y = yd / kr
 
-    # If the best error is too high, consider the result as invalid.
-    if best_err > 0.5:
+        return np.array([x, y], dtype=pixel.dtype)
+
+    elif intrinsic.model == DistortionModel.BROWN_CONRADY:
+        # **Brown-Conrady (Iterative Refinement)**
+        x: F = xd
+        y: F = yd
+        best_err: F = cast(F, 99999) # Large initial error
+
+        # Iterative refinement (up to 40 iterations)
+        for _ in range(40):
+            r2: F = x * x + y * y
+            r4: F = r2 * r2
+            r6: F = r4 * r2
+
+            kr: F = 1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6  # Standard Brown-Conrady correction factor
+            kr_inv: F = cast(F, 1 / kr)
+
+            # Compute tangential distortion corrections
+            dx: F = disto.p1 * 2 * x * y + disto.p2 * (r2 + 2 * x * x)
+            dy: F = disto.p2 * 2 * x * y + disto.p1 * (r2 + 2 * y * y)
+
+            # Update the distortion-free coordinates
+            x = (xd - dx) * kr_inv
+            y = (yd - dy) * kr_inv
+
+            # Re-project to pixel coordinates for error evaluation
+            x_proj: F = cast(F, x * intrinsic.fx + intrinsic.cx)
+            y_proj: F = cast(F, y * intrinsic.fy + intrinsic.cy)
+
+            error: F = np.sqrt((x_proj - pixel[0]) ** 2 + (y_proj - pixel[1]) ** 2)
+
+            if error > best_err:
+                break
+
+            best_err = error
+
+            if error < 0.01:
+                break
+
+        # If the best error is too high, consider the result invalid
+        if best_err > 0.5:
+            return None
+
+        return np.array([x, y], dtype=pixel.dtype)
+
+    else:
+        raise ValueError("Unsupported distortion model")
+
+def transform_point(
+    point: np.ndarray[Literal[3], np.dtype[np.float32]],
+    extrinsics: Extrinsic
+) -> np.ndarray[Literal[3], np.dtype[np.float32]]:
+    """
+    Applies an extrinsic transformation (rotation and translation) to a 3D point.
+    """
+    return extrinsics.rot @ point + extrinsics.transform
+
+def project_point_to_pixel(
+    intrinsic: CameraIntrinsic,
+    point: np.ndarray[Literal[3], np.dtype[np.float32]]
+) -> np.ndarray[Literal[2], np.dtype[np.float32]]:
+    """
+    Projects a 3D point in camera space to a 2D image pixel using intrinsic parameters.
+    """
+    x, y, z = point
+    if z == 0:
+        return np.array([-1, -1], dtype=np.float32)  # Invalid projection
+
+    px = intrinsic.fx * (x / z) + intrinsic.cx
+    py = intrinsic.fy * (y / z) + intrinsic.cy
+
+    return np.array([px, py], dtype=np.float32)
+
+def project_color_pixel_to_depth_pixel(
+    color_pixel: np.ndarray[Literal[2], np.dtype[np.float32]],
+    depth_frame: DepthFrame, 
+    depth_intrinsic: CameraIntrinsic, 
+    color_intrinsic: CameraIntrinsic, 
+    color_to_depth: Extrinsic
+) -> Optional[np.ndarray[Literal[2], np.dtype[np.float32]]]:
+    """
+    Projects a color pixel into depth space by searching along the epipolar line.
+    """
+
+    min_depth = 0.1  # Minimum valid depth in meters
+    max_depth = 5.0  # Maximum reasonable depth in meters
+
+    # Deproject color pixel at min/max depth
+    min_point = undistort_deproject(np.dtype(np.float32), color_intrinsic, color_pixel)
+    max_point = min_point
+
+    if min_point is None or max_point is None:
         return None
 
-    return np.array([x, y], dtype=pixel_f.dtype)
+    min_point = np.array([min_point[0], min_point[1], 1.0]) * min_depth
+    max_point = np.array([max_point[0], max_point[1], 1.0]) * max_depth
+
+    # Transform to depth space
+    min_transformed = transform_point(min_point, color_to_depth)
+    max_transformed = transform_point(max_point, color_to_depth)
+
+    # Project to depth image
+    min_depth_pixel = project_point_to_pixel(depth_intrinsic, min_transformed)
+    max_depth_pixel = project_point_to_pixel(depth_intrinsic, max_transformed)
+
+    if np.any(min_depth_pixel == -1) or np.any(max_depth_pixel == -1):
+        return None
+
+    # Search along the line for closest valid depth pixel
+    best_pixel = None
+    min_dist = float('inf')
+
+    line_pixels = np.linspace(min_depth_pixel, max_depth_pixel, num=50, dtype=np.dtype(np.float32))
+
+    for pixel in line_pixels:
+        px, py = pixel
+        if px < 0 or py < 0 or px >= depth_intrinsic.width or py >= depth_intrinsic.height:
+            continue
+
+        depth_value = depth_frame.get_distance(px, py) # Get depth in meters
+        if depth_value <= 0:
+            continue
+
+        # Reproject to color space
+        point_3d = undistort_deproject(np.dtype(np.float32), depth_intrinsic, np.array([px, py]))
+        if point_3d is None:
+            return None
+        point_3d = np.array([point_3d[0], point_3d[1], 1.0], np.float32)
+        point_3d *= depth_value
+
+        transformed_point = transform_point(point_3d, color_to_depth.inv())
+        reprojected_pixel = project_point_to_pixel(color_intrinsic, transformed_point)
+
+        dist = np.linalg.norm(reprojected_pixel - color_pixel)
+        if dist < min_dist:
+            min_dist = dist
+            best_pixel = pixel
+
+    return best_pixel if best_pixel is not None else None
 
 def marker_pattern():
     # Define the points using normalized coordinates with (0,0) as the top-left corner

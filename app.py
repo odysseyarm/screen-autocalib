@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
                 self.align = rs.align(rs.stream.depth)
 
                 self.pipeline = depth_sensor.realsense.pipeline.Pipeline(_pipeline)
+                self.pipeline._running = True # type: ignore
             case _:
                 raise ValueError("Invalid depth camera source string")
 

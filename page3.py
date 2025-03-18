@@ -13,7 +13,7 @@ import quaternion
 from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
 import depth_sensor.interface.stream_profile
-from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern, undistort_iterative_unproject
+from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern, project_color_pixel_to_depth_pixel, project_point_to_pixel, undistort_deproject
 from calibration_data import CalibrationData
 import depth_sensor.interface.pipeline
 import depth_sensor.interface.frame
@@ -42,28 +42,19 @@ def define_charuco_board_2d_points(board_size: Tuple[int, int], square_length: f
             id += 1
     return points
 
-def my_extract_3d_point(pixel: np.ndarray[Literal[2], np.dtype[np.int32]], intrins: depth_sensor.interface.stream_profile.CameraIntrinsic, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
+def extract_3d_point(pixel: np.ndarray[Literal[2], np.dtype[np.float32]], intrins: depth_sensor.interface.stream_profile.CameraIntrinsic, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
     u, v = pixel.ravel()
     if u < 0 or v < 0:
         return None
     depth = depth_frame.get_distance(int(u), int(v))
     if depth < 0.1 or depth > 10:
         return None
-    ud_pixel = undistort_iterative_unproject(np.dtype(np.float32), intrins, pixel)
+    ud_pixel = undistort_deproject(np.dtype(np.float32), intrins, pixel)
     if ud_pixel is None:
         return None
     else:
         x, y = ud_pixel.ravel()
         return np.array([depth*x, depth*y, depth])
-
-def rs_extract_3d_point(charuco_corner: np.ndarray, rs_intrins: rs.intrinsics, depth_frame: depth_sensor.interface.frame.DepthFrame) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
-    u, v = charuco_corner.ravel()
-    if u < 0 or v < 0:
-        return None
-    depth = depth_frame.get_distance(int(u), int(v))
-    if depth < 0.1 or depth > 10:
-        return None
-    return np.array(rs.rs2_deproject_pixel_to_point(rs_intrins, [u, v], depth), dtype=np.float32)
 
 class Page3(QWidget):
     needs_c2d: bool
@@ -288,65 +279,59 @@ class Page3(QWidget):
                 return
 
             print("finished step 2/5")
-            
+
             # ------------------------------
-            # Step 3. Define the board region in the raw RGB image.
+            # Step 3. Define the board region in the raw depth image.
             # ------------------------------
+            depth_intrinsics = self.depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
+            color_intrinsics = self.color_frame.get_profile().as_video_stream_profile().get_intrinsic()
+            color_to_depth = self.color_frame.get_profile().get_extrinsic_to(self.depth_frame.get_profile())
+
             board_polygon_board = np.array([
                 [0.01, 0.01],
                 [0.99, 0.01],
                 [0.99, 0.99],
                 [0.01, 0.99],
             ], dtype=np.float32)
+
             h_board_inv = np.linalg.inv(h_board)
             board_polygon_raw = cv2.perspectiveTransform(board_polygon_board.reshape(-1, 1, 2), h_board_inv)
-            board_polygon_raw = board_polygon_raw.astype(np.int32)
+            board_polygon_raw = board_polygon_raw.reshape(-1, 2)
 
-            # Create a mask for the board region in the color_image.
-            board_mask = np.zeros(color_image.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(board_mask, [board_polygon_raw.reshape(-1, 2)], 255)
+            # Transform board polygon from color space to depth space
+            board_polygon_depth = np.array([
+                project_color_pixel_to_depth_pixel(
+                    color_pixel=pixel,
+                    depth_frame=self.depth_frame,
+                    depth_intrinsic=depth_intrinsics,
+                    color_intrinsic=color_intrinsics,
+                    color_to_depth=color_to_depth
+                )
+                for pixel in board_polygon_raw
+            ], dtype=np.float32)
 
-            # self.page3.fail("debugging")
-            # # plot draw the color image and the mask
-            # plt.figure()
-            # plt.imshow(color_image)
-            # plt.plot(board_polygon_raw[:, 0, 0], board_polygon_raw[:, 0, 1], 'r-')
-            # plt.show()
-            # return
+            # Remove invalid points
+            board_polygon_depth = np.array([p for p in board_polygon_depth if p is not None], dtype=np.float32)
+
+            if len(board_polygon_depth) < 4:
+                self.signals.myFinished.emit(False, "Could not transform board corners to depth frame.", calibration_data)
+                return
+
+            # Create a mask for the board region in the depth image.
+            board_mask = np.zeros((self.depth_frame.get_height(), self.depth_frame.get_width()), dtype=np.uint8)
+            cv2.fillPoly(board_mask, [board_polygon_depth.astype(np.int32)], 255)
 
             # ------------------------------
-            # Step 4. Generate a grid of points over the board region and align them to the depth frame.
+            # Step 4. Generate a grid of points over the board region and process them in depth space.
             # ------------------------------
             ys, xs = np.where(board_mask > 0)
             grid_points = np.vstack((xs, ys)).T.astype(np.float32)
 
-            aligned_grid_points = grid_points
+            aligned_grid_points = grid_points  # No need to transform further since we're already in depth space
 
-            # Filter out points that did not map correctly (marked as (-1, -1)).
+            # Filter out invalid points
             valid_mask = (aligned_grid_points[:, 0] != -1) & (aligned_grid_points[:, 1] != -1)
-            valid_aligned_points = aligned_grid_points[valid_mask].astype(np.int32)
-
-            # depth_intrinsics = self.depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
-            # c = depth_intrinsics.dist_coeffs
-            # rs_depth_intrins = rs.intrinsics()
-            # rs_depth_intrins.fx, rs_depth_intrins.fy, rs_depth_intrins.height, rs_depth_intrins.width = depth_intrinsics.fx, depth_intrinsics.fy, depth_intrinsics.height, depth_intrinsics.width
-            # rs_depth_intrins.ppx, rs_depth_intrins.ppy = depth_intrinsics.cx, depth_intrinsics.cy
-            # rs_depth_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
-
-            color_intrinsics = self.depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
-            c = color_intrinsics.dist_coeffs
-            rs_color_intrins = rs.intrinsics()
-            rs_color_intrins.fx, rs_color_intrins.fy, rs_color_intrins.height, rs_color_intrins.width = color_intrinsics.fx, color_intrinsics.fy, color_intrinsics.height, color_intrinsics.width
-            rs_color_intrins.ppx, rs_color_intrins.ppy = color_intrinsics.cx, color_intrinsics.cy
-            rs_color_intrins.coeffs = [c.k1, c.k2, c.p1, c.p2, c.k3]
-
-            match color_intrinsics.model:
-                case depth_sensor.interface.stream_profile.DistortionModel.INV_BROWN_CONRADY:
-                    rs_color_intrins.model = rs.distortion.inverse_brown_conrady
-                case depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
-                    rs_color_intrins.model = rs.distortion.brown_conrady
-                case _:
-                    raise ValueError("Distortion model not supported")
+            valid_aligned_points = aligned_grid_points[valid_mask]
 
             # ------------------------------
             # Step 5. Gather 3D points from all valid depth pixels within the board region.
@@ -358,13 +343,12 @@ class Page3(QWidget):
                 if x_d < 0 or x_d >= self.depth_frame.get_width() or y_d < 0 or y_d >= self.depth_frame.get_height():
                     continue
 
-                if color_intrinsics.model == depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY:
-                    point_3d = my_extract_3d_point(pt, color_intrinsics, self.depth_frame)
-                else:
-                    point_3d = rs_extract_3d_point(pt, rs_color_intrins, self.depth_frame)
+                point_3d = extract_3d_point(pt, depth_intrinsics, self.depth_frame)  # Now using depth intrinsics
                 if point_3d is not None:
                     points_3d.append(np.array(point_3d, dtype=np.float32))
+
             points_3d = np.array(points_3d, dtype=np.float32)
+
             if len(points_3d) == 0:
                 self.signals.myFinished.emit(False, "No valid depth points found in board region.", calibration_data)
                 return
@@ -416,14 +400,13 @@ class Page3(QWidget):
                 )
                 align_transform_inv_mtx = np.linalg.inv(calibration_data.align_transform_mtx)
             else:
-                calibration_data.align_transform_mtx = np.eye(3, dtype=np.float64)
-                align_transform_inv_mtx = np.eye(3, dtype=np.float64)
+                calibration_data.align_transform_mtx = np.eye(3, dtype=np.float32)
+                align_transform_inv_mtx = np.eye(3, dtype=np.float32)
 
             # Align the 3D points with gravity.
             calibration_data.points_3d_aligned = [
                 calibration_data.align_transform_mtx @ point for point in inlier_points
             ]
-            calibration_data.intrin = rs_color_intrins
 
             # # for debugging
             # self.page3.fail("debugging")
@@ -451,7 +434,7 @@ class Page3(QWidget):
             deprojected_points = list[np.ndarray[Literal[3], np.dtype[np.float32]]]()
             detected_points_aligned_to_depth = detected_points
             for pt in detected_points_aligned_to_depth:
-                deproj_pt = approximate_intersection(plane, rs_color_intrins, pt[0], pt[1], 0, 1000)
+                deproj_pt = approximate_intersection(plane, color_intrinsics, pt[0], pt[1], 0, 1000)
                 if np.all(deproj_pt == 0):
                     deprojected_points.append(np.array([np.NaN, np.NaN, np.NaN], dtype=np.float32))
                 else:
@@ -514,13 +497,13 @@ class Page3(QWidget):
                 [1, 0, -transformed_unit_square_2d_aligned[0][0][0]],
                 [0, 1, -transformed_unit_square_2d_aligned[0][0][1]],
                 [0, 0, 1]
-            ], dtype=np.float64)
+            ], dtype=np.float32)
             offset_mtx_3d = np.array([
                 [1, 0, 0, -transformed_unit_square_2d_aligned[0][0][0]],
                 [0, 1, 0, -transformed_unit_square_2d_aligned[0][0][1]],
                 [0, 0, 1, 0],
                 [0, 0, 0, 1]
-            ], dtype=np.float64)
+            ], dtype=np.float32)
             calibration_data.h_aligned = offset_mtx @ calibration_data.h_aligned
             calibration_data.xy_transformation_matrix_aligned = offset_mtx_3d @ calibration_data.xy_transformation_matrix_aligned
             transformed_unit_square_2d_aligned = cv2.perspectiveTransform(
@@ -545,7 +528,7 @@ class Page3(QWidget):
             ]
             calibration_data.best_quad_2d = []
             for point in calibration_data.best_quad:
-                point_2d = rs.rs2_project_point_to_pixel(rs_color_intrins, point)
+                point_2d = project_point_to_pixel(color_intrinsics, point)
                 calibration_data.best_quad_2d.append(point_2d)
             calibration_data.best_quad_2d = np.array(calibration_data.best_quad_2d, dtype=np.int32)
 
@@ -657,7 +640,7 @@ class Page3(QWidget):
 
     def start_data_thread(self) -> None:
         self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
-        self.data_thread.frame_processor.filters = ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.ALIGN_D2C
+        self.data_thread.frame_processor.filters = ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
         self.main_window.threadpool.start(self.data_thread)
 

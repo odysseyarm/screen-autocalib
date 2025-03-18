@@ -2,6 +2,7 @@ import enum
 from typing import Protocol
 
 import numpy.typing as npt
+import numpy as np
 
 from depth_sensor.interface.stream_profile import StreamProfile
 
@@ -44,7 +45,7 @@ class ColorFrame(Frame, Protocol):
 class DepthFrame(Frame, Protocol):
     def get_data(self) -> npt.ArrayLike:
         ...
-    def get_distance(self, x: int, y: int) -> float:
+    def get_distance(self, x: int, y: int) -> np.float32:
         ...
     def get_profile(self) -> StreamProfile:
         ...

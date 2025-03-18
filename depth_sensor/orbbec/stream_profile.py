@@ -7,6 +7,8 @@ from typing import Literal, Self
 import depth_sensor.interface.pipeline
 import depth_sensor.interface.stream_profile
 
+from functools import singledispatch
+
 class CameraDistortion(depth_sensor.interface.stream_profile.CameraDistortion):
     def __init__(self, ob_d: pyorbbecsdk.OBCameraDistortion):
         self.k1, self.k2, self.k3, self.k4, self.k5, self.k6 = ob_d.k1, ob_d.k2, ob_d.k3, ob_d.k4, ob_d.k5, ob_d.k6
@@ -24,9 +26,34 @@ class Extrinsic(depth_sensor.interface.stream_profile.Extrinsic):
     rot: numpy.ndarray[Literal[3,3], numpy.dtype[numpy.float32]]
     transform: numpy.ndarray[Literal[3], numpy.dtype[numpy.float32]]
 
-    def __init__(self, ob_extrinsic: pyorbbecsdk.OBExtrinsic):
+    @singledispatch
+    def __init__(self) -> None:
+        return
+
+    @__init__.register
+    def _(self, ob_extrinsic: pyorbbecsdk.OBExtrinsic) -> None:
         self.rot = ob_extrinsic.rot # type: ignore
         self.transform = ob_extrinsic.transform # type: ignore
+
+    def inv(self) -> Extrinsic:
+        """
+        Computes the inverse of the extrinsic transformation.
+
+        The inverse of an extrinsic transformation (rotation & translation) is:
+            R_inv = R^T  (transpose of rotation matrix)
+            t_inv = -R^T * t  (negated, transformed translation vector)
+
+        Returns:
+            Extrinsic: The inverse transformation.
+        """
+        R_inv = self.rot.T  # Transpose of rotation matrix
+        t_inv = -R_inv @ self.transform  # Transform translation
+
+        inv_extrinsic = Extrinsic()
+        inv_extrinsic.rot = R_inv
+        inv_extrinsic.transform = t_inv
+
+        return inv_extrinsic
 
 class StreamProfile:
     _internal_profile: pyorbbecsdk.StreamProfile
@@ -43,7 +70,7 @@ class StreamProfile:
 class VideoStreamProfile(StreamProfile):
     _internal_video_profile: pyorbbecsdk.VideoStreamProfile
 
-    def __init__(self, orbbec_profile: pyorbbecsdk.VideoStreamProfile):
+    def __init__(self, orbbec_profile: pyorbbecsdk.VideoStreamProfile) -> None:
         self._internal_video_profile = orbbec_profile
         self._internal_profile = orbbec_profile
 

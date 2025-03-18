@@ -133,9 +133,9 @@ class DepthFrame:
     def get_data(self) -> npt.NDArray[np.uint16]:
         return self._reshaped
 
-    def get_distance(self, x: int, y: int) -> float:
+    def get_distance(self, x: int, y: int) -> np.float32:
         # meters
-        ret = self._internal.get_depth_scale() * 0.001 * self.get_data()[y, x]
+        ret = np.float32(self._internal.get_depth_scale()) * np.float32(0.001) * np.float32(self.get_data()[y, x])
         return ret
 
     def get_profile(self) -> stream_profile.StreamProfile:

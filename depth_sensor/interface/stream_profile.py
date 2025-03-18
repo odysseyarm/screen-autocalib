@@ -41,6 +41,9 @@ class Extrinsic:
     rot: numpy.ndarray[Literal[3,3], numpy.dtype[numpy.float32]]
     transform: numpy.ndarray[Literal[3], numpy.dtype[numpy.float32]]
 
+    def inv(self) -> Extrinsic:
+        ...
+
 class StreamProfile(Protocol):
     def get_extrinsic_to(self, to: Self) -> Extrinsic:
         ...
