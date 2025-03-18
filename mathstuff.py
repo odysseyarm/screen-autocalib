@@ -234,15 +234,25 @@ def undistort_deproject(
     disto: CameraDistortion = intrinsic.dist_coeffs
 
     if intrinsic.model == DistortionModel.INV_BROWN_CONRADY:
-        # **Inverse Brown-Conrady (Direct Computation)**
-        r2: F = xd * xd + yd * yd
-        r4: F = r2 * r2
-        r6: F = r4 * r2
-        
-        kr: F = 1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6  # Inverse Brown-Conrady correction factor
+        # **Inverse Brown-Conrady (RealSense)**
+        x: F = xd
+        y: F = yd
+        xo: F = xd
+        yo: F = yd
 
-        x = xd / kr
-        y = yd / kr
+        # Iterative refinement (up to 40 iterations)
+        for _ in range(40):
+            r2: F = x * x + y * y
+            icdist: F = 1.0 / (1.0 + ((disto.k5 * r2 + disto.k2) * r2 + disto.k1) * r2)
+
+            xq: F = x / icdist
+            yq: F = y / icdist
+
+            delta_x: F = 2 * disto.p1 * xq * yq + disto.p2 * (r2 + 2 * xq * xq)
+            delta_y: F = 2 * disto.p2 * xq * yq + disto.p1 * (r2 + 2 * yq * yq)
+
+            x = (xo - delta_x) * icdist
+            y = (yo - delta_y) * icdist
 
         return np.array([x, y], dtype=pixel.dtype)
 
@@ -250,7 +260,6 @@ def undistort_deproject(
         # **Brown-Conrady (Iterative Refinement)**
         x: F = xd
         y: F = yd
-        best_err: F = cast(F, 99999) # Large initial error
 
         # Iterative refinement (up to 40 iterations)
         for _ in range(40):
@@ -268,24 +277,6 @@ def undistort_deproject(
             # Update the distortion-free coordinates
             x = (xd - dx) * kr_inv
             y = (yd - dy) * kr_inv
-
-            # Re-project to pixel coordinates for error evaluation
-            x_proj: F = cast(F, x * intrinsic.fx + intrinsic.cx)
-            y_proj: F = cast(F, y * intrinsic.fy + intrinsic.cy)
-
-            error: F = np.sqrt((x_proj - pixel[0]) ** 2 + (y_proj - pixel[1]) ** 2)
-
-            if error > best_err:
-                break
-
-            best_err = error
-
-            if error < 0.01:
-                break
-
-        # If the best error is too high, consider the result invalid
-        if best_err > 0.5:
-            return None
 
         return np.array([x, y], dtype=pixel.dtype)
 
