@@ -336,7 +336,7 @@ def project_color_pixel_to_depth_pixel(
     depth_intrinsic: CameraIntrinsic, 
     color_intrinsic: CameraIntrinsic, 
     color_to_depth: Extrinsic
-) -> Optional[np.ndarray[Literal[2], np.dtype[np.float32]]]:
+) -> Optional[np.ndarray[Literal[2], np.dtype[np.int32]]]:
     """
     Projects a color pixel into depth space by searching along the epipolar line.
     """
@@ -395,7 +395,10 @@ def project_color_pixel_to_depth_pixel(
             min_dist = dist
             best_pixel = pixel
 
-    return best_pixel
+    if best_pixel is None:
+        return None
+    else:
+        return np.array([int(best_pixel[0]), int(best_pixel[1])])
 
 def marker_pattern():
     # Define the points using normalized coordinates with (0,0) as the top-left corner

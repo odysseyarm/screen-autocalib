@@ -289,10 +289,10 @@ class Page3(QWidget):
             color_to_depth = self.color_frame.get_profile().get_extrinsic_to(self.depth_frame.get_profile())
 
             board_polygon_board = np.array([
-                [0.01, 0.01],
-                [0.99, 0.01],
-                [0.99, 0.99],
-                [0.01, 0.99],
+                [0.05, 0.05],
+                [0.95, 0.05],
+                [0.95, 0.95],
+                [0.05, 0.95],
             ], dtype=np.float32)
 
             h_board_inv = np.linalg.inv(h_board)
@@ -310,7 +310,7 @@ class Page3(QWidget):
                 )
 
                 if depth_pixel is None or np.isnan(depth_pixel[0]) or np.isnan(depth_pixel[1]):
-                    self.signals.myFinished.emit(False, "Failed to convert one or more of the screen polygon color corners to a depth corner.", calibration_data)
+                    self.signals.myFinished.emit(False, "Failed to convert one or more of the screen polygon color corners to a depth corner. Probably screen is not in full view of infrared camera", calibration_data)
                     return
                 
                 pixels.append(depth_pixel)
