@@ -3,8 +3,8 @@ import numpy.typing as npt
 import cv2
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
 from PySide6.QtCore import Qt, QObject, QRunnable, QTimer, QThreadPool, Signal
-from PySide6.QtGui import QImage, QPixmap, QScreen
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
+from PySide6.QtGui import QCursor, QImage, QPixmap, QScreen
+from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
 from platformdirs import user_data_dir
 import io
 import json
@@ -375,6 +375,15 @@ class Page3(QWidget):
             if plane is None:
                 self.signals.myFinished.emit(False, "Plane fitting failed", calibration_data)
                 return
+
+            depth_to_color = color_to_depth.inv()
+
+            temp = np.array([plane[0][0], plane[0][1], plane[0][2], 1])
+            temp = depth_to_color.transform @ temp
+            new_translation = temp[:3]
+            new_rot = depth_to_color.rot @ plane[1]
+            plane = (new_translation, new_rot)
+
             calibration_data.plane = plane
             calibration_data.plane_rmse = plane_rmse
             calibration_data.plane_max_error = plane_max_error
@@ -537,6 +546,7 @@ class Page3(QWidget):
             self.signals.myFinished.emit(True, "", calibration_data)
 
     def on_go_clicked(self) -> None:
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.BlankCursor));
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
         self.label.showFullScreen()
         QTimer.singleShot(3000, self.run_big_huge_process)  # type: ignore
@@ -557,6 +567,7 @@ class Page3(QWidget):
         self.label.setPixmap(pixmap)
 
     def big_huge_process_finished(self, success: bool, err_msg: str, calibration_data: CalibrationData):
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.ArrowCursor));
         if success:
             self.main_window.calibration_data = calibration_data
 

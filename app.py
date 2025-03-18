@@ -75,9 +75,10 @@ class MainWindow(QMainWindow):
 
                 device = ob_pipeline.get_device()
                 device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_SHARPNESS_INT, 255)
-                device.set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, False)
-                device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_GAIN_INT, 1)
-                device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_EXPOSURE_INT, 5000)
+                device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_POWER_LINE_FREQUENCY_INT,  2)
+                # device.set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, False)
+                # device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_GAIN_INT, 1)
+                # device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_EXPOSURE_INT, 4000)
 
                 profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.COLOR_SENSOR)
                 _color_profile = profile_list.get_video_stream_profile(1920, 0, pyorbbecsdk.OBFormat.RGB, 15)

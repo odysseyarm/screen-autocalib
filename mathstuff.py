@@ -156,7 +156,7 @@ def evaluate_plane(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np
     centroid, normal = plane
     return np.dot(normal, point - centroid)
 
-def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-12):
+def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-10):
     def deproject(x, y, d):
         pt = undistort_deproject(np.float32, intrin, np.array([x, y]))
         return np.array([pt[0], pt[1], 1]) * d
@@ -311,7 +311,7 @@ def transform_point(
     """
     Applies an extrinsic transformation (rotation and translation) to a 3D point.
     """
-    return extrinsics.rot @ point + extrinsics.transform
+    return extrinsics.rot @ point + extrinsics.translation
 
 def project_point_to_pixel(
     intrinsic: CameraIntrinsic,

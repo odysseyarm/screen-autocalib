@@ -22,7 +22,8 @@ class CameraIntrinsic(depth_sensor.interface.stream_profile.CameraIntrinsic):
 
 class Extrinsic(depth_sensor.interface.stream_profile.Extrinsic):
     rot: np.ndarray[Literal[3,3], np.dtype[np.float32]]
-    transform: np.ndarray[Literal[3], np.dtype[np.float32]]
+    translation: np.ndarray[Literal[3], np.dtype[np.float32]]
+    transform: np.ndarray[Literal[4,4], np.dtype[np.float32]]
 
     def __init__(self, rs_extrinsic: pyrealsense2.extrinsics|None = None):
         """
@@ -34,10 +35,14 @@ class Extrinsic(depth_sensor.interface.stream_profile.Extrinsic):
         """
         if isinstance(rs_extrinsic, pyrealsense2.extrinsics):
             self.rot = np.array(rs_extrinsic.rotation).reshape((3,3)).T
-            self.transform = np.array(rs_extrinsic.translation, dtype=np.float32)
+            self.translation = np.array(rs_extrinsic.translation, dtype=np.float32)
+            self.transform = np.eye(4, dtype=np.float32)
+            self.transform[:3, :3] = self.rot
+            self.transform[:3, 3] = self.translation.flatten()
         else:
             self.rot = np.eye(3, dtype=np.float32)  # Identity rotation
-            self.transform = np.zeros(3, dtype=np.float32)  # Zero translation
+            self.translation = np.zeros(3, dtype=np.float32)  # Zero translation
+            self.transform = np.eye(4, dtype=np.float32)
 
     def inv(self) -> Extrinsic:
         """
@@ -51,11 +56,11 @@ class Extrinsic(depth_sensor.interface.stream_profile.Extrinsic):
             Extrinsic: The inverse transformation.
         """
         R_inv = self.rot.T  # Transpose of rotation matrix
-        t_inv = -R_inv @ self.transform  # Transform translation
+        t_inv = -R_inv @ self.translation  # Transform translation
 
         inv_extrinsic = Extrinsic()
         inv_extrinsic.rot = R_inv
-        inv_extrinsic.transform = t_inv
+        inv_extrinsic.translation = t_inv
 
         return inv_extrinsic
 

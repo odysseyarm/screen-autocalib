@@ -22,7 +22,8 @@ class CameraIntrinsic(depth_sensor.interface.stream_profile.CameraIntrinsic):
 
 class Extrinsic(depth_sensor.interface.stream_profile.Extrinsic):
     rot: np.ndarray[Literal[3,3], np.dtype[np.float32]]
-    transform: np.ndarray[Literal[3], np.dtype[np.float32]]
+    translation: np.ndarray[Literal[3], np.dtype[np.float32]]
+    transform: np.ndarray[Literal[4,4], np.dtype[np.float32]]
 
     def __init__(self, ob_extrinsic: pyorbbecsdk.OBExtrinsic|None = None):
         """
@@ -33,29 +34,30 @@ class Extrinsic(depth_sensor.interface.stream_profile.Extrinsic):
         - singledispatchmethod was failing so have to do it this way
         """
         if isinstance(ob_extrinsic, pyorbbecsdk.OBExtrinsic):
-            self.rot = np.array(ob_extrinsic.rot).reshape((3,3)).T # type: ignore
-            self.transform = np.array(ob_extrinsic.transform, dtype=np.float32)/np.float32(1000) # type: ignore
+            # orbbec is row-major
+            self.rot = np.array(ob_extrinsic.rot).reshape((3,3)) # type: ignore
+            self.translation = np.array(ob_extrinsic.transform, dtype=np.float32)/np.float32(1000) # type: ignore
+            self.transform = np.eye(4, dtype=np.float32)
+            self.transform[:3, :3] = self.rot
+            self.transform[:3, 3] = self.translation.flatten()
         else:
             self.rot = np.eye(3, dtype=np.float32)  # Identity rotation
-            self.transform = np.zeros(3, dtype=np.float32)  # Zero translation
+            self.translation = np.zeros(3, dtype=np.float32)  # Zero translation
+            self.transform = np.eye(4, dtype=np.float32)
 
     def inv(self) -> Extrinsic:
         """
         Computes the inverse of the extrinsic transformation.
 
-        The inverse of an extrinsic transformation (rotation & translation) is:
-            R_inv = R^T  (transpose of rotation matrix)
-            t_inv = -R^T * t  (negated, transformed translation vector)
-
         Returns:
             Extrinsic: The inverse transformation.
         """
-        R_inv = self.rot.T  # Transpose of rotation matrix
-        t_inv = -R_inv @ self.transform  # Transform translation
 
         inv_extrinsic = Extrinsic()
-        inv_extrinsic.rot = R_inv
-        inv_extrinsic.transform = t_inv
+
+        inv_extrinsic.transform = np.linalg.inv(self.transform)
+        inv_extrinsic.rot = inv_extrinsic.transform[:3, :3]
+        inv_extrinsic.translation = inv_extrinsic.transform[:3, 3]
 
         return inv_extrinsic
 

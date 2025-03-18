@@ -39,7 +39,8 @@ class CameraIntrinsic:
 
 class Extrinsic:
     rot: numpy.ndarray[Literal[3,3], numpy.dtype[numpy.float32]]
-    transform: numpy.ndarray[Literal[3], numpy.dtype[numpy.float32]]
+    translation: numpy.ndarray[Literal[3], numpy.dtype[numpy.float32]]
+    transform: numpy.ndarray[Literal[4,4], numpy.dtype[numpy.float32]]
 
     def inv(self) -> Extrinsic:
         ...
