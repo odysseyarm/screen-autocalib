@@ -85,7 +85,8 @@ class MainWindow(QMainWindow):
                 config.enable_stream(_ir_profile)
                 config.enable_stream(_depth_profile)
 
-                config.set_align_mode(pyorbbecsdk.OBAlignMode.SW_MODE)
+                # config.set_align_mode(pyorbbecsdk.OBAlignMode.SW_MODE)
+                config.set_align_mode(pyorbbecsdk.OBAlignMode.DISABLE)
 
                 self.pipeline = depth_sensor.orbbec.pipeline.Pipeline(ob_pipeline, config)
                 self.pipeline.start()

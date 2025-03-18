@@ -308,6 +308,7 @@ def project_point_to_pixel(
 
     return np.array([px, py], dtype=np.float32)
 
+# Warning: this truncates for depth so it is imprecise
 def project_color_pixel_to_depth_pixel(
     color_pixel: np.ndarray[Literal[2], np.dtype[np.float32]],
     depth_frame: DepthFrame, 
@@ -354,7 +355,7 @@ def project_color_pixel_to_depth_pixel(
         if px < 0 or py < 0 or px >= depth_intrinsic.width or py >= depth_intrinsic.height:
             continue
 
-        depth_value = depth_frame.get_distance(px, py) # Get depth in meters
+        depth_value = depth_frame.get_distance(int(px), int(py)) # Get depth in meters
         if depth_value <= 0:
             continue
 
@@ -373,7 +374,7 @@ def project_color_pixel_to_depth_pixel(
             min_dist = dist
             best_pixel = pixel
 
-    return best_pixel if best_pixel is not None else None
+    return best_pixel
 
 def marker_pattern():
     # Define the points using normalized coordinates with (0,0) as the top-left corner

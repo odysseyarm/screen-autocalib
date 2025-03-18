@@ -165,6 +165,7 @@ class Page3(QWidget):
                 self.exit_application()
     
     def go_next(self) -> None:
+        self.pipeline.stop()
         if self.data_thread is not None:
             self.data_thread.stop()
         if self.next_timer is not None:
@@ -298,24 +299,24 @@ class Page3(QWidget):
             board_polygon_raw = cv2.perspectiveTransform(board_polygon_board.reshape(-1, 1, 2), h_board_inv)
             board_polygon_raw = board_polygon_raw.reshape(-1, 2)
 
-            # Transform board polygon from color space to depth space
-            board_polygon_depth = np.array([
-                project_color_pixel_to_depth_pixel(
+            pixels = []
+            for pixel in board_polygon_raw:
+                depth_pixel = project_color_pixel_to_depth_pixel(
                     color_pixel=pixel,
                     depth_frame=self.depth_frame,
                     depth_intrinsic=depth_intrinsics,
                     color_intrinsic=color_intrinsics,
                     color_to_depth=color_to_depth
                 )
-                for pixel in board_polygon_raw
-            ], dtype=np.float32)
 
-            # Remove invalid points
-            board_polygon_depth = np.array([p for p in board_polygon_depth if p is not None], dtype=np.float32)
+                if depth_pixel is None or np.isnan(depth_pixel[0]) or np.isnan(depth_pixel[1]):
+                    self.signals.myFinished.emit(False, "Failed to convert one or more of the screen polygon color corners to a depth corner.", calibration_data)
+                    return
+                
+                pixels.append(depth_pixel)
 
-            if len(board_polygon_depth) < 4:
-                self.signals.myFinished.emit(False, "Could not transform board corners to depth frame.", calibration_data)
-                return
+            # Transform board polygon from color space to depth space
+            board_polygon_depth = np.array(pixels)
 
             # Create a mask for the board region in the depth image.
             board_mask = np.zeros((self.depth_frame.get_height(), self.depth_frame.get_width()), dtype=np.uint8)
@@ -452,7 +453,6 @@ class Page3(QWidget):
             )
             if len(np.unique(deprojected_points_aligned, axis=0)) <= 1:
                 self.page3.fail("Deprojected points are not distinct.")
-                self.page3.pipeline.start()
                 return
 
             # Compute transformation matrix to flatten the plane to the XY plane.
@@ -567,11 +567,9 @@ class Page3(QWidget):
             self.label.hide()
             self.stacked_layout.setCurrentWidget(self.initial_widget)
 
-            self.pipeline.start()
-            self.start_data_thread()
+            self.start_data_thread(True)
         else:
-            self.pipeline.start()
-            self.start_data_thread()
+            self.start_data_thread(True)
             self.fail(err_msg)
 
     def fail(self, msg: Optional[str]) -> None:
@@ -638,8 +636,8 @@ class Page3(QWidget):
         self.latest_color_frame = frames.get_color_frame()
         self.latest_depth_frame = frames.get_depth_frame()
 
-    def start_data_thread(self) -> None:
-        self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
+    def start_data_thread(self, start_pipeline: bool=False) -> None:
+        self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool, start_pipeline)
         self.data_thread.frame_processor.filters = ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
         self.main_window.threadpool.start(self.data_thread)

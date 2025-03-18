@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import numpy
+import numpy as np
 import pyorbbecsdk
 from typing import Literal, Self
 
 import depth_sensor.interface.pipeline
 import depth_sensor.interface.stream_profile
-
-from functools import singledispatch
 
 class CameraDistortion(depth_sensor.interface.stream_profile.CameraDistortion):
     def __init__(self, ob_d: pyorbbecsdk.OBCameraDistortion):
@@ -23,17 +21,23 @@ class CameraIntrinsic(depth_sensor.interface.stream_profile.CameraIntrinsic):
         self.model = depth_sensor.interface.stream_profile.DistortionModel.BROWN_CONRADY
 
 class Extrinsic(depth_sensor.interface.stream_profile.Extrinsic):
-    rot: numpy.ndarray[Literal[3,3], numpy.dtype[numpy.float32]]
-    transform: numpy.ndarray[Literal[3], numpy.dtype[numpy.float32]]
+    rot: np.ndarray[Literal[3,3], np.dtype[np.float32]]
+    transform: np.ndarray[Literal[3], np.dtype[np.float32]]
 
-    @singledispatch
-    def __init__(self) -> None:
-        return
+    def __init__(self, ob_extrinsic: pyorbbecsdk.OBExtrinsic|None = None):
+        """
+        Initializes the extrinsic transformation.
 
-    @__init__.register
-    def _(self, ob_extrinsic: pyorbbecsdk.OBExtrinsic) -> None:
-        self.rot = ob_extrinsic.rot # type: ignore
-        self.transform = ob_extrinsic.transform # type: ignore
+        - If `ob_extrinsic` is provided, initializes from a RealSense extrinsics object.
+        - Otherwise, initializes to an identity transformation (no rotation, no translation).
+        - singledispatchmethod was failing so have to do it this way
+        """
+        if isinstance(ob_extrinsic, pyorbbecsdk.OBExtrinsic):
+            self.rot = np.array(ob_extrinsic.rot).reshape((3,3)).T # type: ignore
+            self.transform = np.array(ob_extrinsic.transform, dtype=np.float32)/np.float32(1000) # type: ignore
+        else:
+            self.rot = np.eye(3, dtype=np.float32)  # Identity rotation
+            self.transform = np.zeros(3, dtype=np.float32)  # Zero translation
 
     def inv(self) -> Extrinsic:
         """

@@ -57,18 +57,23 @@ class FrameProcessor(QRunnable):
 class DataAcquisitionThread(QRunnable):
     threadpool: QThreadPool
     frame_processor: FrameProcessor
+    start_pipeline: bool
 
-    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline, threadpool: QThreadPool, parent: Optional[QObject] = None):
+    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline, threadpool: QThreadPool, start_pipeline: bool = False, parent: Optional[QObject] = None):
         super().__init__(parent)
         self.daemon = True
         self.pipeline = pipeline
         self.threadpool = threadpool
         self.frame_processor = FrameProcessor(pipeline)
+        self.start_pipeline = start_pipeline
         self.running = False
 
     def run(self):
         self.running = True
         self.threadpool.start(self.frame_processor)
+        if self.start_pipeline:
+            print("starting pipeline")
+            self.pipeline.start()
         while self.running:
             frames = self.pipeline.try_wait_for_frames()
             if frames is not None:
