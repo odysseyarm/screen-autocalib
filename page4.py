@@ -123,8 +123,8 @@ class Page4(QWidget):
             return False
 
         self.pipeline.stop()
-        if self.data_thread is not None:
-            self.data_thread.stop()
+        # if self.data_thread is not None:
+        #     self.data_thread.stop()
 
         print(f"Detected {len(detected_markers_2d)} IR blobs, now approximating 3D positions...")
 
@@ -172,10 +172,10 @@ class Page4(QWidget):
         #     depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
 
         self.pipeline.start()
-        self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
+        # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
         self.data_thread.frame_processor.filters = None
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
-        self.main_window.threadpool.start(self.data_thread)
+        # self.main_window.threadpool.start(self.data_thread)
 
         if self.auto_progress:
             self.start_countdown()
@@ -220,8 +220,9 @@ class Page4(QWidget):
         self.camera_pixmap_item.setPos(self.canvas.viewport().width() / 2, self.canvas.viewport().height() / 2)
 
     def stop_data_thread(self) -> None:
-        if self.data_thread and self.data_thread.running:
-            self.data_thread.stop()
+        # if self.data_thread and self.data_thread.running:
+        #     self.data_thread.stop()
+        return
 
     def closeEvent(self, event: QEvent) -> None:
         self.stop_data_thread()

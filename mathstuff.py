@@ -257,26 +257,47 @@ def undistort_deproject(
         return np.array([x, y], dtype=pixel.dtype)
 
     elif intrinsic.model == DistortionModel.BROWN_CONRADY:
-        # **Brown-Conrady (Iterative Refinement)**
+        # **Brown-Conrady (Exact Math from Provided C++ Code)**
         x: F = xd
         y: F = yd
+        best_err: F = cast(F, np.float32(99999)) # Large initial error
 
-        # Iterative refinement (up to 40 iterations)
-        for _ in range(40):
+        for _ in range(20):  # Fixed at 20 iterations
             r2: F = x * x + y * y
             r4: F = r2 * r2
             r6: F = r4 * r2
 
-            kr: F = 1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6  # Standard Brown-Conrady correction factor
-            kr_inv: F = cast(F, 1 / kr)
-
-            # Compute tangential distortion corrections
+            kr_inv: F = (1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6) / (1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6)
             dx: F = disto.p1 * 2 * x * y + disto.p2 * (r2 + 2 * x * x)
             dy: F = disto.p2 * 2 * x * y + disto.p1 * (r2 + 2 * y * y)
 
-            # Update the distortion-free coordinates
             x = (xd - dx) * kr_inv
             y = (yd - dy) * kr_inv
+
+            # Compute projection error to ensure convergence
+            r2 = x * x + y * y
+            r4 = r2 * r2
+            r6 = r4 * r2
+
+            a1 = 2 * x * y
+            a2 = r2 + 2 * x * x
+            a3 = r2 + 2 * y * y
+
+            cdist = (1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6) / (1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6)
+            xd0 = x * cdist + disto.p1 * a1 + disto.p2 * a2
+            yd0 = y * cdist + disto.p1 * a3 + disto.p2 * a1
+
+            x_proj = xd0 * intrinsic.fx + intrinsic.cx
+            y_proj = yd0 * intrinsic.fy + intrinsic.cy
+            error = np.sqrt((x_proj - pixel[0]) ** 2 + (y_proj - pixel[1]) ** 2)
+
+            if error > best_err:
+                break
+
+            best_err = error
+
+            if error < 0.01:
+                break
 
         return np.array([x, y], dtype=pixel.dtype)
 

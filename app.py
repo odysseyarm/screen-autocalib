@@ -16,6 +16,7 @@ from typing import Optional
 import depth_sensor.interface.pipeline
 import depth_sensor.orbbec.pipeline
 import depth_sensor.realsense.pipeline
+from data_acquisition import DataAcquisitionThread
 
 import signal
 
@@ -160,10 +161,16 @@ class MainWindow(QMainWindow):
             case _:
                 raise ValueError("Invalid depth camera source string")
 
+        self.data_thread = DataAcquisitionThread(self.pipeline, self.threadpool, True)
+        self.threadpool.start(self.data_thread)
+
         try:
             self.page2.pipeline = self.pipeline
+            self.page2.data_thread = self.data_thread
             self.page3.pipeline = self.pipeline
+            self.page3.data_thread = self.data_thread
             self.page4.pipeline = self.pipeline
+            self.page4.data_thread = self.data_thread
 
             self.goto_page2()
 

@@ -637,14 +637,17 @@ class Page3(QWidget):
         self.latest_depth_frame = frames.get_depth_frame()
 
     def start_data_thread(self, start_pipeline: bool=False) -> None:
-        self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool, start_pipeline)
+        # if self.data_thread and self.data_thread.running:
+        #     return
+        # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool, start_pipeline)
         self.data_thread.frame_processor.filters = ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
-        self.main_window.threadpool.start(self.data_thread)
+        # self.main_window.threadpool.start(self.data_thread)
 
     def stop_data_thread(self) -> None:
-        if self.data_thread and self.data_thread.running:
-            self.data_thread.stop()
+        # if self.data_thread and self.data_thread.running:
+        #     self.data_thread.stop()
+        return
 
     def closeEvent(self, event: Any) -> None:
         self.stop_data_thread()

@@ -21,6 +21,7 @@ class Pipeline:
     def __init__(self, ob_pipeline: pyorbbecsdk.Pipeline, config: pyorbbecsdk.Config):
         self._internal = ob_pipeline
         self._config = config
+        self._internal.enable_frame_sync()
 
     def try_wait_for_frames(self, timeout_ms: int = 5000) -> Optional[pyorbbecsdk.FrameSet]:
         frameset = self._internal.wait_for_frames(timeout_ms)
@@ -34,14 +35,15 @@ class Pipeline:
         return frameset
 
     def start(self) -> None:
-        self._internal.enable_frame_sync()
-        self._internal.start(self._config) # type: ignore
-        self._running = True
+        if not self._running:
+            self._internal.start(self._config) # type: ignore
+            self._running = True
 
     def stop(self) -> None:
-        # if self._running:
-        self._internal.stop()
-        self._running = False
+        if self._running:
+            self._internal.stop()
+            self._running = False
+        return
 
     def enable_stream(self, stream: depth_sensor.interface.pipeline.Stream, format: depth_sensor.interface.pipeline.frame.StreamFormat) -> None:
         pass

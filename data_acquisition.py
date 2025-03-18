@@ -82,5 +82,6 @@ class DataAcquisitionThread(QRunnable):
                 print("Failed to get frames (maybe doing blocking calculations)")
 
     def stop(self):
-        self.running = False
-        self.frame_processor.stop()
+        return
+    #     self.running = False
+    #     self.frame_processor.stop()

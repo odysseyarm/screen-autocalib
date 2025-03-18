@@ -113,9 +113,9 @@ class Page2(QWidget):
 
         assert self.pipeline is not None
 
-        self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
+        # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
-        self.main_window.threadpool.start(self.data_thread)
+        # self.main_window.threadpool.start(self.data_thread)
 
         if self.auto_progress:
             self.start_countdown()
@@ -136,8 +136,8 @@ class Page2(QWidget):
     def go_next(self) -> None:
         if self.countdown_timer is not None:
             self.countdown_timer.stop()
-        if self.data_thread is not None:
-            self.data_thread.stop()
+        # if self.data_thread is not None:
+        #     self.data_thread.stop()
         self.next_page()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
