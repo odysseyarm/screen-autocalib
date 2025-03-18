@@ -117,7 +117,7 @@ class Page3(QWidget):
         self.charuco_widget.setLayout(self.charuco_layout)
 
         self.label = QLabel()
-        # self.charuco_layout.addWidget(self.label)
+        self.charuco_layout.addWidget(self.label)
 
         self.stacked_layout.addWidget(self.charuco_widget)
 
@@ -165,11 +165,9 @@ class Page3(QWidget):
                 self.exit_application()
     
     def go_next(self) -> None:
-        self.pipeline.stop()
-        if self.data_thread is not None:
-            self.data_thread.stop()
         if self.next_timer is not None:
             self.next_timer.stop()
+        self.data_thread.frame_processor.signals.data_updated.disconnect()
         self.next_page()
 
     def resizeEvent(self, event: Any) -> None:
@@ -180,6 +178,8 @@ class Page3(QWidget):
 
         color_frame: depth_sensor.interface.frame.ColorFrame
         depth_frame = depth_sensor.interface.frame.DepthFrame
+
+        color_to_depth: depth_sensor.interface.stream_profile.Extrinsic
 
         cols: int
         rows: int
@@ -193,7 +193,7 @@ class Page3(QWidget):
             def __init__(self):
                 super().__init__()
             myFinished = Signal(bool, str, CalibrationData)
-        
+
         signals: Signals
 
         def __init__(self):
@@ -286,7 +286,6 @@ class Page3(QWidget):
             # ------------------------------
             depth_intrinsics = self.depth_frame.get_profile().as_video_stream_profile().get_intrinsic()
             color_intrinsics = self.color_frame.get_profile().as_video_stream_profile().get_intrinsic()
-            color_to_depth = self.color_frame.get_profile().get_extrinsic_to(self.depth_frame.get_profile())
 
             board_polygon_board = np.array([
                 [0.05, 0.05],
@@ -306,7 +305,7 @@ class Page3(QWidget):
                     depth_frame=self.depth_frame,
                     depth_intrinsic=depth_intrinsics,
                     color_intrinsic=color_intrinsics,
-                    color_to_depth=color_to_depth
+                    color_to_depth=self.color_to_depth
                 )
 
                 if depth_pixel is None or np.isnan(depth_pixel[0]) or np.isnan(depth_pixel[1]):
@@ -373,7 +372,7 @@ class Page3(QWidget):
                 self.signals.myFinished.emit(False, "Plane fitting failed", calibration_data)
                 return
 
-            depth_to_color = color_to_depth.inv()
+            depth_to_color = self.color_to_depth.inv()
 
             temp = np.array([plane[0][0], plane[0][1], plane[0][2], 1])
             temp = depth_to_color.transform @ temp
@@ -575,9 +574,9 @@ class Page3(QWidget):
             self.label.hide()
             self.stacked_layout.setCurrentWidget(self.initial_widget)
 
-            self.start_data_thread(True)
+            self.start_data_thread()
         else:
-            self.start_data_thread(True)
+            self.start_data_thread()
             self.fail(err_msg)
 
     def fail(self, msg: Optional[str]) -> None:
@@ -596,18 +595,19 @@ class Page3(QWidget):
             self.fail("No frames available for ChArUco board detection.")
             return
 
-        self.pipeline.stop()
-        self.stop_data_thread()
-
         big_huge_process = self.BigHugeProcess()
 
         big_huge_process.color_frame = color_frame
         big_huge_process.depth_frame = depth_frame
+        color_to_depth = color_frame.get_profile().get_extrinsic_to(depth_frame.get_profile())
+        big_huge_process.color_to_depth = color_to_depth
         big_huge_process.rows = self.rows
         big_huge_process.cols = self.cols
         big_huge_process.Q = self.Q
         big_huge_process.motion_support = self.motion_support
         big_huge_process.screen_size = self.screen_size
+
+        self.pipeline.stop()
 
         big_huge_process.signals.myFinished.connect(self.big_huge_process_finished)
         self.main_window.threadpool.start(big_huge_process)
@@ -644,31 +644,17 @@ class Page3(QWidget):
         self.latest_color_frame = frames.get_color_frame()
         self.latest_depth_frame = frames.get_depth_frame()
 
-    def start_data_thread(self, start_pipeline: bool=False) -> None:
+    def start_data_thread(self) -> None:
         # if self.data_thread and self.data_thread.running:
         #     return
         # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool, start_pipeline)
-        self.data_thread.frame_processor.filters = ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL
+        self.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.HDR_MERGE)
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
+        self.pipeline.start()
         # self.main_window.threadpool.start(self.data_thread)
 
-    def stop_data_thread(self) -> None:
-        # if self.data_thread and self.data_thread.running:
-        #     self.data_thread.stop()
+    def closeEvent(self, event: Any) -> None:
         return
 
-    def closeEvent(self, event: Any) -> None:
-        self.stop_data_thread()
-
     def exit_application(self) -> None:
-        self.stop_data_thread()
-
-        # stopping the pipeline causes the app to hang
-        # if hasattr(self, 'pipeline') and self.pipeline and self.pipeline is not None:
-        #     try:
-        #         self.pipeline.stop()
-        #     except Exception as e:
-        #         print(f"Error stopping pipeline: {e}")
-        #     self.pipeline = None
-
         self.main_window_exit_application()

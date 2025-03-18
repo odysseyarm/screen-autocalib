@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress) # type: ignore
         self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, screen)
-        self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure)
+        self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, args.enable_hdr)
         self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir, screen, args.screen_diagonal)
 
         self.stacked_widget.addWidget(self.page2)
@@ -60,13 +60,13 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.page5)
 
         if self.bag_file is None and args.source == DepthCameraSource.realsense:
-            self.page1 = Page1(self, self.init_pipeline, self.exit_application)
+            self.page1 = Page1(self, lambda: self.init_pipeline(args.enable_hdr), self.exit_application)
             self.stacked_widget.addWidget(self.page1)
             self.stacked_widget.setCurrentWidget(self.page1)
         else:
-            self.init_pipeline()
+            self.init_pipeline(args.enable_hdr)
 
-    def init_pipeline(self) -> None:
+    def init_pipeline(self, enable_hdr: bool) -> None:
         # Initialize the pipeline
         match self.args.source:
             case DepthCameraSource.orbbec:
@@ -138,8 +138,12 @@ class MainWindow(QMainWindow):
                     _depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
                     if _depth_sensor:
                         _depth_sensor.set_option(rs.option.depth_units, 0.0001)
-                        _depth_sensor.set_option(rs.option.enable_auto_exposure, False)
-                        _depth_sensor.set_option(rs.option.hdr_enabled, True)
+                        if enable_hdr:
+                            _depth_sensor.set_option(rs.option.enable_auto_exposure, False)
+                            _depth_sensor.set_option(rs.option.hdr_enabled, True)
+                        else:
+                            _depth_sensor.set_option(rs.option.enable_auto_exposure, True)
+                            _depth_sensor.set_option(rs.option.hdr_enabled, False)
                         _depth_sensor.set_option(rs.option.laser_power, self.args.laser_power)
 
                     _color_sensor = self.pipeline_profile.get_device().first_color_sensor()
@@ -163,7 +167,7 @@ class MainWindow(QMainWindow):
 
                 self.align = rs.align(rs.stream.depth)
 
-                self.pipeline = depth_sensor.realsense.pipeline.Pipeline(_pipeline)
+                self.pipeline = depth_sensor.realsense.pipeline.Pipeline(_pipeline, config)
                 self.pipeline._running = True # type: ignore
             case _:
                 raise ValueError("Invalid depth camera source string")
@@ -238,6 +242,7 @@ def main():
     parser.add_argument('--laser-power', default=150, type=float, help='Laser dot grid projector power (0-360)')
     parser.add_argument('--screen-diagonal', type=float, help='Screen diagonal size in inches')
     parser.add_argument('--source', default=DepthCameraSource.realsense, type=DepthCameraSource, choices=list(DepthCameraSource))
+    parser.add_argument('--enable-hdr', default=False, action="store_true")
     args = parser.parse_args()
 
     app = QApplication(sys.argv[:1])

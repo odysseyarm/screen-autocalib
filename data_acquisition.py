@@ -11,6 +11,7 @@ import depth_sensor.interface.pipeline
 import depth_sensor.orbbec
 import depth_sensor.orbbec.frame
 import depth_sensor.realsense
+import depth_sensor.realsense.frame
 
 class FrameProcessor(QRunnable):
 
@@ -38,10 +39,11 @@ class FrameProcessor(QRunnable):
                         processed_frameset = self.pipeline.filters_process(self.latest_frameset, self.filters)
                     else:
                         processed_frameset = self.latest_frameset
-                    if isinstance(processed_frameset, pyorbbecsdk.FrameSet):
-                        self.signals.data_updated.emit(depth_sensor.orbbec.frame.CompositeFrame(processed_frameset))
-                    else:
-                        self.signals.data_updated.emit(depth_sensor.realsense.frame.CompositeFrame(processed_frameset))
+                    if processed_frameset is not None:
+                        if isinstance(processed_frameset, pyorbbecsdk.FrameSet):
+                            self.signals.data_updated.emit(depth_sensor.orbbec.frame.CompositeFrame(processed_frameset))
+                        else:
+                            self.signals.data_updated.emit(depth_sensor.realsense.frame.CompositeFrame(processed_frameset))
                     self.latest_frameset = None
             time.sleep(0.001)
 
@@ -53,6 +55,10 @@ class FrameProcessor(QRunnable):
         with self.lock:
             self.running = False
             self.latest_frameset = None
+    
+    def set_filters(self, filters: Optional[depth_sensor.interface.pipeline.Filter]):
+        with self.lock:
+            self.filters = filters
 
 class DataAcquisitionThread(QRunnable):
     threadpool: QThreadPool
@@ -79,7 +85,8 @@ class DataAcquisitionThread(QRunnable):
             if frames is not None:
                 self.frame_processor.latest_frameset = frames
             else:
-                print("Failed to get frames (maybe doing blocking calculations)")
+                # print("Failed to get frames (is pipeline running?)")
+                pass
 
     def stop(self):
         return

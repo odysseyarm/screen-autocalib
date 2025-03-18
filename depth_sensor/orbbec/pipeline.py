@@ -52,42 +52,49 @@ class Pipeline:
         return self._internal.get_device().is_property_supported(pyorbbecsdk.OBPropertyID.OB_STRUCT_DEPTH_HDR_CONFIG, pyorbbecsdk.OBPermissionType.PERMISSION_READ_WRITE)
 
     def filters_process(self, frameset: pyorbbecsdk.FrameSet, filters: depth_sensor.interface.pipeline.Filter) -> Optional[pyorbbecsdk.FrameSet]:
-        if depth_sensor.interface.pipeline.Filter.NOISE_REMOVAL in filters:
-            if self._noise_removal_filter is None:
-                self._noise_removal_filter = pyorbbecsdk.NoiseRemovalFilter()
-                params = pyorbbecsdk.OBNoiseRemovalFilterParams()
-                params.disp_diff = 256
-                params.max_size = 80
-                self._noise_removal_filter.set_filter_params(params)
+        try:
+            if depth_sensor.interface.pipeline.Filter.NOISE_REMOVAL in filters:
+                if self._noise_removal_filter is None:
+                    self._noise_removal_filter = pyorbbecsdk.NoiseRemovalFilter()
+                    params = pyorbbecsdk.OBNoiseRemovalFilterParams()
+                    params.disp_diff = 256
+                    params.max_size = 80
+                    self._noise_removal_filter.set_filter_params(params)
 
-        if depth_sensor.interface.pipeline.Filter.TEMPORAL in filters:
-            if self._temporal_filter is None:
-                self._temporal_filter = pyorbbecsdk.TemporalFilter()
-                self._temporal_filter.set_diff_scale(0.1)
-                self._temporal_filter.set_weight(0.4)
-            frameset = self._temporal_filter.process(frameset)
+            if depth_sensor.interface.pipeline.Filter.TEMPORAL in filters:
+                if self._temporal_filter is None:
+                    self._temporal_filter = pyorbbecsdk.TemporalFilter()
+                    self._temporal_filter.set_diff_scale(0.1)
+                    self._temporal_filter.set_weight(0.4)
+                frameset = self._temporal_filter.process(frameset)
 
-        if depth_sensor.interface.pipeline.Filter.SPATIAL in filters:
-            if self._spatial_filter is None:
-                self._spatial_filter = pyorbbecsdk.SpatialAdvancedFilter()
-                params = pyorbbecsdk.OBSpatialAdvancedFilterParams()
-                params.alpha = 0.5
-                params.disp_diff = 160
-                params.magnitude = 1
-                params.radius = 1
-                self._spatial_filter.set_filter_params(params)
-            frameset = self._spatial_filter.process(frameset)
+            if depth_sensor.interface.pipeline.Filter.SPATIAL in filters:
+                if self._spatial_filter is None:
+                    self._spatial_filter = pyorbbecsdk.SpatialAdvancedFilter()
+                    params = pyorbbecsdk.OBSpatialAdvancedFilterParams()
+                    params.alpha = 0.5
+                    params.disp_diff = 160
+                    params.magnitude = 1
+                    params.radius = 1
+                    self._spatial_filter.set_filter_params(params)
+                frameset = self._spatial_filter.process(frameset)
 
-        if depth_sensor.interface.pipeline.Filter.ALIGN_D2C in filters:
-            if self._align_d2c_filter is None:
-                self._align_d2c_filter = pyorbbecsdk.AlignFilter(align_to_stream=pyorbbecsdk.OBStreamType.COLOR_STREAM)
-            frameset = self._align_d2c_filter.process(frameset)
+            if depth_sensor.interface.pipeline.Filter.ALIGN_D2C in filters:
+                if self._align_d2c_filter is None:
+                    self._align_d2c_filter = pyorbbecsdk.AlignFilter(align_to_stream=pyorbbecsdk.OBStreamType.COLOR_STREAM)
+                frameset = self._align_d2c_filter.process(frameset)
 
-        if frameset is None: # type: ignore
+            if frameset is None: # type: ignore
+                return None
+        except pyorbbecsdk.OBError as e:
+            print(e)
             return None
-        
+
         frameset = frameset.as_frame_set()
         if frameset.get_color_frame() is None or frameset.get_ir_frame() is None: # type: ignore
             return None
 
         return frameset
+    
+    def set_hdr_enabled(self, enabled: bool):
+        return

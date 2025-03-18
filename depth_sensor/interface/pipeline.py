@@ -12,6 +12,7 @@ class Stream(enum.Enum):
     INFRARED = 2
 
 class Filter(enum.Flag):
+    HDR_MERGE = enum.auto()
     NOISE_REMOVAL = enum.auto()
     TEMPORAL = enum.auto()
     SPATIAL = enum.auto()
@@ -38,4 +39,7 @@ class Pipeline(Protocol):
 
     T=TypeVar("T", covariant=True, bound=(pyorbbecsdk.FrameSet|pyrealsense2.composite_frame))
     def filters_process(self, frameset: T, filters: Filter) -> Optional[T]:
+        ...
+    
+    def set_hdr_enabled(self, enabled: bool):
         ...

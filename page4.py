@@ -19,8 +19,9 @@ class MainWindow(QWidget):
     calibration_data: CalibrationData
 
 class Page4(QWidget):
-    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: ds_pipeline.Pipeline, auto_progress: bool, ir_low_exposure: float) -> None:
+    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: ds_pipeline.Pipeline, auto_progress: bool, ir_low_exposure: float, enable_hdr: bool) -> None:
         super().__init__(parent)
+        self.enable_hdr = enable_hdr
         self.main_window = parent
         self.exit_application = exit_application
         self.motion_support = False
@@ -171,9 +172,14 @@ class Page4(QWidget):
         # else:
         #     depth_sensor.set_option(rs.option.exposure, self.ir_low_exposure)
 
+        self.pipeline.stop()
+        self.data_thread.frame_processor.set_filters(None)
         self.pipeline.start()
+
+        if self.enable_hdr:
+            if self.pipeline.hdr_supported():
+                self.pipeline.set_hdr_enabled(False)
         # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
-        self.data_thread.frame_processor.filters = None
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
         # self.main_window.threadpool.start(self.data_thread)
 
@@ -225,4 +231,4 @@ class Page4(QWidget):
         return
 
     def closeEvent(self, event: QEvent) -> None:
-        self.stop_data_thread()
+        return
