@@ -202,28 +202,14 @@ class MainWindow(QMainWindow):
         self.stacked_widget.setCurrentWidget(self.page5)
 
     def exit_application(self) -> None:
-        # stopping the pipeline causes the app to hang
-        # if hasattr(self, 'pipeline') and self.pipeline and self.pipeline is not None:
-        #     try:
-        #         self.pipeline.stop()
-        #     except Exception as e:
-        #         print(f"Error stopping pipeline: {e}")
-        #     self.pipeline = None
-        # print("stopped pipeline")
-
         QApplication.closeAllWindows()
         instance = QApplication.instance()
         if instance is not None:
             instance.quit()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        # stopping the pipeline causes the app to hang
-        # if hasattr(self, 'pipeline') and self.pipeline and self.pipeline is not None:
-        #     try:
-        #         self.pipeline.stop()
-        #     except Exception as e:
-        #         print(f"Error stopping pipeline: {e}")
-        #     self.pipeline = None
+        if hasattr(self, 'pipeline') and self.pipeline:
+            self.pipeline.stop()
 
         self.page2.closeEvent(event)
         self.page3.closeEvent(event)

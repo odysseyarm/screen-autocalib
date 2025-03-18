@@ -329,6 +329,55 @@ def project_point_to_pixel(
 
     return np.array([px, py], dtype=np.float32)
 
+def project_point_to_pixel_with_distortion(
+    intrinsic: CameraIntrinsic,
+    point: np.ndarray[Literal[3], np.dtype[F]]
+) -> np.ndarray[Literal[2], np.dtype[F]]:
+    """
+    Projects a 3D point in camera space to a 2D image pixel using intrinsic parameters 
+    and manually applies distortion.
+    """
+    x, y, z = point
+    if z == 0:
+        return np.array([-1, -1], dtype=point.dtype)  # Invalid projection
+
+    # Normalize 3D coordinates
+    xn: F = x / z
+    yn: F = y / z
+
+    disto: CameraDistortion = intrinsic.dist_coeffs
+
+    r2: F = xn * xn + yn * yn
+    r4: F = r2 * r2
+    r6: F = r4 * r2
+
+    if intrinsic.model == DistortionModel.BROWN_CONRADY:
+        # **Brown-Conrady distortion**
+        radial: F = (1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6) / (1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6)
+        tangential_x: F = 2 * disto.p1 * xn * yn + disto.p2 * (r2 + 2 * xn * xn)
+        tangential_y: F = disto.p1 * (r2 + 2 * yn * yn) + 2 * disto.p2 * xn * yn
+
+        xd: F = xn * radial + tangential_x
+        yd: F = yn * radial + tangential_y
+
+    elif intrinsic.model == DistortionModel.INV_BROWN_CONRADY:
+        # **Inverse Brown-Conrady distortion**
+        icdist: F = 1.0 / (1.0 + ((disto.k5 * r2 + disto.k2) * r2 + disto.k1) * r2)
+        tangential_x: F = 2 * disto.p1 * xn * yn + disto.p2 * (r2 + 2 * xn * xn)
+        tangential_y: F = 2 * disto.p2 * xn * yn + disto.p1 * (r2 + 2 * yn * yn)
+
+        xd: F = (xn + tangential_x) * icdist
+        yd: F = (yn + tangential_y) * icdist
+
+    else:
+        raise ValueError("Unsupported distortion model")
+
+    # Convert back to pixel space
+    px: F = intrinsic.fx * xd + intrinsic.cx
+    py: F = intrinsic.fy * yd + intrinsic.cy
+
+    return np.array([px, py], dtype=point.dtype)
+
 # Warning: this truncates for depth so it is imprecise
 def project_color_pixel_to_depth_pixel(
     color_pixel: np.ndarray[Literal[2], np.dtype[np.float32]],
@@ -388,7 +437,7 @@ def project_color_pixel_to_depth_pixel(
         point_3d *= depth_value
 
         transformed_point = transform_point(point_3d, color_to_depth.inv())
-        reprojected_pixel = project_point_to_pixel(color_intrinsic, transformed_point)
+        reprojected_pixel = project_point_to_pixel_with_distortion(color_intrinsic, transformed_point)
 
         dist = np.linalg.norm(reprojected_pixel - color_pixel)
         if dist < min_dist:

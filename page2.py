@@ -173,13 +173,4 @@ class Page2(QWidget):
         self.stop_data_thread()
 
     def exit_application(self) -> None:
-        self.stop_data_thread()
-
-        # if hasattr(self, 'pipeline') and self.pipeline and self.pipeline is not None:
-        #     try:
-        #         self.pipeline.stop()
-        #     except Exception as e:
-        #         print(f"Error stopping pipeline: {e}")
-        #     self.pipeline = None
-
         self.main_window_exit_application()

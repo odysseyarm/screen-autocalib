@@ -13,7 +13,7 @@ import quaternion
 from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
 import depth_sensor.interface.stream_profile
-from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern, project_color_pixel_to_depth_pixel, project_point_to_pixel, undistort_deproject
+from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern, project_color_pixel_to_depth_pixel, project_point_to_pixel, project_point_to_pixel_with_distortion, undistort_deproject
 from calibration_data import CalibrationData
 import depth_sensor.interface.pipeline
 import depth_sensor.interface.frame
@@ -315,7 +315,6 @@ class Page3(QWidget):
                 
                 pixels.append(depth_pixel)
 
-            # Transform board polygon from color space to depth space
             board_polygon_depth = np.array(pixels)
 
             # Create a mask for the board region in the depth image.
@@ -328,17 +327,15 @@ class Page3(QWidget):
             ys, xs = np.where(board_mask > 0)
             grid_points = np.vstack((xs, ys)).T.astype(np.float32)
 
-            aligned_grid_points = grid_points  # No need to transform further since we're already in depth space
-
             # Filter out invalid points
-            valid_mask = (aligned_grid_points[:, 0] != -1) & (aligned_grid_points[:, 1] != -1)
-            valid_aligned_points = aligned_grid_points[valid_mask]
+            valid_mask = (grid_points[:, 0] != -1) & (grid_points[:, 1] != -1)
+            grid_points = grid_points[valid_mask]
 
             # ------------------------------
             # Step 5. Gather 3D points from all valid depth pixels within the board region.
             # ------------------------------
             points_3d = []
-            for pt in valid_aligned_points:
+            for pt in grid_points:
                 x_d, y_d = pt
 
                 if x_d < 0 or x_d >= self.depth_frame.get_width() or y_d < 0 or y_d >= self.depth_frame.get_height():
@@ -537,7 +534,7 @@ class Page3(QWidget):
             ]
             calibration_data.best_quad_2d = []
             for point in calibration_data.best_quad:
-                point_2d = project_point_to_pixel(color_intrinsics, point)
+                point_2d = project_point_to_pixel_with_distortion(color_intrinsics, point)
                 calibration_data.best_quad_2d.append(point_2d)
             calibration_data.best_quad_2d = np.array(calibration_data.best_quad_2d, dtype=np.int32)
 
@@ -549,7 +546,7 @@ class Page3(QWidget):
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.BlankCursor));
         self.stacked_layout.setCurrentWidget(self.charuco_widget)
         self.label.showFullScreen()
-        QTimer.singleShot(3000, self.run_big_huge_process)  # type: ignore
+        QTimer.singleShot(5000, self.run_big_huge_process)  # type: ignore
 
     def create_charuco_board(self) -> None:
         # Create the ChArUco board
