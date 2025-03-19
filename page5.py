@@ -139,8 +139,8 @@ class Page5(QWidget):
 
         # Draw the detected marker pattern on the image as purple circles
         for i,point in enumerate(calibration_data.detected_marker_pattern_2d):
-            cv2.circle(calibration_data.color_image, tuple(point), 5, (255, 0, 255), -1)
-            cv2.putText(calibration_data.color_image, str(i), tuple(point), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.circle(calibration_data.color_image, tuple(point.astype(int)), 5, (255, 0, 255), -1)
+            cv2.putText(calibration_data.color_image, str(i), tuple(point.astype(int)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
         self.plane_error_label.setText(
             f"Plane fit RMSE: {calibration_data.plane_rmse*1000} mm\n"

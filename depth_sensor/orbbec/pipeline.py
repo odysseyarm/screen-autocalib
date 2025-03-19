@@ -98,3 +98,7 @@ class Pipeline:
     
     def set_hdr_enabled(self, enabled: bool):
         return
+
+    def set_ir_exposure(self, exposure: int):
+        self._internal.get_device().set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_IR_AUTO_EXPOSURE_BOOL, False)
+        self._internal.get_device().set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_IR_EXPOSURE_INT, exposure)

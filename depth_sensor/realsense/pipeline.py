@@ -80,3 +80,7 @@ class Pipeline:
     def set_hdr_enabled(self, enabled: bool):
         self._internal.get_active_profile().get_device().first_depth_sensor().set_option(rs.option.hdr_enabled, enabled)
         self._internal.get_active_profile().get_device().first_depth_sensor().set_option(rs.option.enable_auto_exposure, True)
+
+    def set_ir_exposure(self, exposure: int):
+        self._internal.get_active_profile().get_device().first_depth_sensor().set_option(rs.option.enable_auto_exposure, False)
+        self._internal.get_active_profile().get_device().first_depth_sensor().set_option(rs.option.exposure, exposure)

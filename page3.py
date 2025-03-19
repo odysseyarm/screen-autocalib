@@ -380,6 +380,10 @@ class Page3(QWidget):
             new_rot = depth_to_color.rot @ plane[1]
             plane = (new_translation, new_rot)
 
+            calibration_data.debug = self.color_frame.get_profile()
+            calibration_data.depth_plane = plane
+            calibration_data.depth_to_color = depth_to_color
+            calibration_data.color_intrinsics = color_intrinsics
             calibration_data.plane = plane
             calibration_data.plane_rmse = plane_rmse
             calibration_data.plane_max_error = plane_max_error

@@ -40,6 +40,9 @@ class Pipeline(Protocol):
     T=TypeVar("T", covariant=True, bound=(pyorbbecsdk.FrameSet|pyrealsense2.composite_frame))
     def filters_process(self, frameset: T, filters: Filter) -> Optional[T]:
         ...
-    
+
     def set_hdr_enabled(self, enabled: bool):
+        ...
+
+    def set_ir_exposure(self, exposure: int):
         ...

@@ -124,17 +124,24 @@ class Page4(QWidget):
             return False
 
         self.pipeline.stop()
-        # if self.data_thread is not None:
-        #     self.data_thread.stop()
 
         print(f"Detected {len(detected_markers_2d)} IR blobs, now approximating 3D positions...")
+
+        print("depth to color")
+        print(self.main_window.calibration_data.depth_to_color.transform)
+
+        print("ir to color")
+        print(ir_frame.get_profile().as_video_stream_profile().get_extrinsic_to(self.main_window.calibration_data.debug).transform)
 
         detected_markers_3d = []
         for point in detected_markers_2d:
             # print(f"Approximating 3D position for IR blob at {point}")
-            point_3d = mathstuff.approximate_intersection(self.main_window.calibration_data.plane, ir_frame.get_profile().as_video_stream_profile().get_intrinsic(), point[0], point[1], 0, 1000)
+            point_3d = mathstuff.approximate_intersection(self.main_window.calibration_data.depth_plane, ir_frame.get_profile().as_video_stream_profile().get_intrinsic(), point[0], point[1], 0, 1000)
+            temp = np.array([point_3d[0], point_3d[1], point_3d[2], 1])
+            temp = self.main_window.calibration_data.depth_to_color.transform @ temp
+            point_3d = temp[:3]
             detected_markers_3d.append(point_3d)
-        
+
         detected_markers_3d_aligned = [self.main_window.calibration_data.align_transform_mtx @ point for point in detected_markers_3d]
 
         print("Finding closest detected blobs to expected positions...")
@@ -145,7 +152,7 @@ class Page4(QWidget):
             distances = [np.linalg.norm(point - detected_marker) for detected_marker in detected_markers_3d_aligned]
             closest_index = np.argmin(distances)
             detected_marker_pattern_aligned.append(detected_markers_3d_aligned[closest_index])
-            detected_marker_pattern_2d.append(detected_markers_2d[closest_index])
+            detected_marker_pattern_2d.append(mathstuff.project_point_to_pixel(self.main_window.calibration_data.color_intrinsics, detected_markers_3d_aligned[closest_index]))
             detected_markers_3d_aligned.pop(closest_index)
             detected_markers_2d.pop(closest_index)
 
@@ -179,6 +186,9 @@ class Page4(QWidget):
         if self.enable_hdr:
             if self.pipeline.hdr_supported():
                 self.pipeline.set_hdr_enabled(False)
+        else:
+            self.pipeline.set_ir_exposure(self.ir_low_exposure)
+
         # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
         # self.main_window.threadpool.start(self.data_thread)

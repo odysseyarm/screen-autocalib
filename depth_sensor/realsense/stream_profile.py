@@ -48,19 +48,15 @@ class Extrinsic(depth_sensor.interface.stream_profile.Extrinsic):
         """
         Computes the inverse of the extrinsic transformation.
 
-        The inverse of an extrinsic transformation (rotation & translation) is:
-            R_inv = R^T  (transpose of rotation matrix)
-            t_inv = -R^T * t  (negated, transformed translation vector)
-
         Returns:
             Extrinsic: The inverse transformation.
         """
-        R_inv = self.rot.T  # Transpose of rotation matrix
-        t_inv = -R_inv @ self.translation  # Transform translation
 
         inv_extrinsic = Extrinsic()
-        inv_extrinsic.rot = R_inv
-        inv_extrinsic.translation = t_inv
+
+        inv_extrinsic.transform = np.linalg.inv(self.transform)
+        inv_extrinsic.rot = inv_extrinsic.transform[:3, :3]
+        inv_extrinsic.translation = inv_extrinsic.transform[:3, 3]
 
         return inv_extrinsic
 
