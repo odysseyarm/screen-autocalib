@@ -156,17 +156,25 @@ def evaluate_plane(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np
     centroid, normal = plane
     return np.dot(normal, point - centroid)
 
-def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin, x, y, min_z, max_z, epsilon=1e-10):
-    def deproject(x, y, d):
-        pt = undistort_deproject(np.float32, intrin, np.array([x, y]))
-        return np.array([pt[0], pt[1], 1]) * d
-    
+def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.float32]], np.ndarray[Literal[3], np.dtype[np.float32]]], intrin: CameraIntrinsic, x: np.float32, y: np.float32, min_z: np.float32, max_z: np.float32, epsilon: np.float32=np.float32(1e-10)):
+    def deproject(x: np.float32, y: np.float32, d: np.float32) -> Optional[np.ndarray[Literal[3], np.dtype[np.float32]]]:
+        pt = undistort_deproject(np.dtype(np.float32), intrin, np.array([x, y]))
+        if pt is None:
+            return None
+        return np.array([pt[0], pt[1], 1], dtype=np.float32) * d
+
     min_point = deproject(x, y, min_z)
     max_point = deproject(x, y, max_z)
-    
+
+    if min_point is None:
+        return np.array([0, 0, 0])
+
+    if max_point is None:
+        return np.array([0, 0, 0])
+
     min_eval = evaluate_plane(plane, min_point)
     max_eval = evaluate_plane(plane, max_point)
-    
+
     if min_eval * max_eval > 0:
         print("Plane evaluation at min and max points have the same sign")
         return np.array([0, 0, 0])
@@ -174,6 +182,8 @@ def approximate_intersection(plane: Tuple[np.ndarray[Literal[3], np.dtype[np.flo
     while max_z - min_z > epsilon:
         mid_z = (min_z + max_z) / 2
         mid_point = deproject(x, y, mid_z)
+        if mid_point is None:
+            return np.array([0, 0, 0])
         mid_eval = evaluate_plane(plane, mid_point)
 
         if mid_eval == 0:

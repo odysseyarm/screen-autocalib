@@ -367,21 +367,20 @@ class Page3(QWidget):
             # return
 
             # Fit a plane using the custom plane_from_points function.
-            (plane, plane_rmse, plane_max_error, inlier_points) = plane_from_points(points_3d)
-            if plane is None:
+            (depth_plane, plane_rmse, plane_max_error, inlier_points) = plane_from_points(points_3d)
+            if depth_plane is None:
                 self.signals.myFinished.emit(False, "Plane fitting failed", calibration_data)
                 return
 
             depth_to_color = self.color_to_depth.inv()
 
-            temp = np.array([plane[0][0], plane[0][1], plane[0][2], 1])
+            temp = np.array([depth_plane[0][0], depth_plane[0][1], depth_plane[0][2], 1])
             temp = depth_to_color.transform @ temp
             new_translation = temp[:3]
-            new_rot = depth_to_color.rot @ plane[1]
+            new_rot = depth_to_color.rot @ depth_plane[1]
             plane = (new_translation, new_rot)
 
-            calibration_data.debug = self.color_frame.get_profile()
-            calibration_data.depth_plane = plane
+            calibration_data.depth_plane = depth_plane
             calibration_data.depth_to_color = depth_to_color
             calibration_data.color_intrinsics = color_intrinsics
             calibration_data.plane = plane

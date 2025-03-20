@@ -108,8 +108,8 @@ class Page4(QWidget):
             if cv2.contourArea(cnt) > 10:  # Filter small contours
                 M = cv2.moments(cnt)
                 if M['m00'] != 0:
-                    cx = int(M['m10'] / M['m00'])
-                    cy = int(M['m01'] / M['m00'])
+                    cx = np.float32(M['m10']) / np.float32(M['m00'])
+                    cy = np.float32(M['m01']) / np.float32(M['m00'])
                     detected_markers_2d.append([cx, cy])
 
         # Find the expected ir marker locations
@@ -126,12 +126,6 @@ class Page4(QWidget):
         self.pipeline.stop()
 
         print(f"Detected {len(detected_markers_2d)} IR blobs, now approximating 3D positions...")
-
-        print("depth to color")
-        print(self.main_window.calibration_data.depth_to_color.transform)
-
-        print("ir to color")
-        print(ir_frame.get_profile().as_video_stream_profile().get_extrinsic_to(self.main_window.calibration_data.debug).transform)
 
         detected_markers_3d = []
         for point in detected_markers_2d:
@@ -152,9 +146,9 @@ class Page4(QWidget):
             distances = [np.linalg.norm(point - detected_marker) for detected_marker in detected_markers_3d_aligned]
             closest_index = np.argmin(distances)
             detected_marker_pattern_aligned.append(detected_markers_3d_aligned[closest_index])
-            detected_marker_pattern_2d.append(mathstuff.project_point_to_pixel(self.main_window.calibration_data.color_intrinsics, detected_markers_3d_aligned[closest_index]))
+            projected_point = mathstuff.project_point_to_pixel_with_distortion(self.main_window.calibration_data.color_intrinsics, detected_markers_3d_aligned[closest_index])
+            detected_marker_pattern_2d.append(projected_point)
             detected_markers_3d_aligned.pop(closest_index)
-            detected_markers_2d.pop(closest_index)
 
         detected_marker_pattern_aligned_transformed = mathstuff.apply_transformation(np.array(detected_marker_pattern_aligned, dtype=np.float32), self.main_window.calibration_data.xy_transformation_matrix_aligned)
 
