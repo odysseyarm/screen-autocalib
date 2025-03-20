@@ -78,9 +78,13 @@ class Pipeline:
         return True
 
     def set_hdr_enabled(self, enabled: bool):
-        self._internal.get_active_profile().get_device().first_depth_sensor().set_option(rs.option.hdr_enabled, enabled)
-        self._internal.get_active_profile().get_device().first_depth_sensor().set_option(rs.option.enable_auto_exposure, True)
+        depth_sensor = self._internal.get_active_profile().get_device().first_depth_sensor()
+        if not depth_sensor.is_option_read_only(rs.option.hdr_enabled):
+            depth_sensor.set_option(rs.option.hdr_enabled, enabled)
+            depth_sensor.set_option(rs.option.enable_auto_exposure, True)
 
     def set_ir_exposure(self, exposure: int):
-        self._internal.get_active_profile().get_device().first_depth_sensor().set_option(rs.option.enable_auto_exposure, False)
-        self._internal.get_active_profile().get_device().first_depth_sensor().set_option(rs.option.exposure, exposure)
+        depth_sensor = self._internal.get_active_profile().get_device().first_depth_sensor()
+        if not depth_sensor.is_option_read_only(rs.option.exposure):
+            depth_sensor.set_option(rs.option.enable_auto_exposure, False)
+            depth_sensor.set_option(rs.option.exposure, exposure)
