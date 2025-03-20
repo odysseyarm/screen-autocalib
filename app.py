@@ -67,6 +67,8 @@ class MainWindow(QMainWindow):
             self.init_pipeline(args.enable_hdr)
 
     def init_pipeline(self, enable_hdr: bool) -> None:
+        motion_support = False
+
         # Initialize the pipeline
         match self.args.source:
             case DepthCameraSource.orbbec:
@@ -101,8 +103,6 @@ class MainWindow(QMainWindow):
             case DepthCameraSource.realsense:
                 _pipeline = rs.pipeline()
                 config = rs.config()
-
-                motion_support = False
 
                 self.pipeline_profile: Optional[rs.pipeline_profile] = None
 
@@ -179,7 +179,7 @@ class MainWindow(QMainWindow):
             self.page2.pipeline = self.pipeline
             self.page2.data_thread = self.data_thread
             self.page3.pipeline = self.pipeline
-            self.page3.data_thread = self.data_thread
+            self.page3.motion_support = motion_support
             self.page4.pipeline = self.pipeline
             self.page4.data_thread = self.data_thread
 

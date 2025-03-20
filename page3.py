@@ -18,6 +18,7 @@ from calibration_data import CalibrationData
 import depth_sensor.interface.pipeline
 import depth_sensor.interface.frame
 from depth_sensor.interface import pipeline as ds_pipeline
+from depth_sensor.realsense import frame as ds_rs_frame
 import pyrealsense2 as rs
 
 import matplotlib
@@ -29,6 +30,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
 class MainWindow(QWidget):
+    data_thread: DataAcquisitionThread
     pipeline: Optional[depth_sensor.interface.pipeline.Pipeline]
     calibration_data: CalibrationData
     threadpool: QThreadPool
@@ -57,7 +59,7 @@ def extract_3d_point(pixel: np.ndarray[Literal[2], np.dtype[np.float32]], intrin
         return np.array([depth*x, depth*y, depth])
 
 class Page3(QWidget):
-    needs_c2d: bool
+    Q: np.ndarray[Literal[4], np.dtype[np.float32]]
 
     def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: depth_sensor.interface.pipeline.Pipeline, auto_progress: bool, screen: QScreen) -> None:
         super().__init__(parent)
@@ -75,7 +77,6 @@ class Page3(QWidget):
         self.latest_depth_frame: Optional[depth_sensor.interface.frame.DepthFrame] = None
         self.madgwick = Madgwick(gain=0.5)
         self.Q = np.array([1.0, 0.0, 0.0, 0.0])
-        self.data_thread: Optional[DataAcquisitionThread] = None
         self.cols = 30
         self.rows = 16
         # self.cols = 12
@@ -167,7 +168,7 @@ class Page3(QWidget):
     def go_next(self) -> None:
         if self.next_timer is not None:
             self.next_timer.stop()
-        self.data_thread.frame_processor.signals.data_updated.disconnect()
+        self.main_window.data_thread.frame_processor.signals.data_updated.disconnect()
         self.next_page()
 
     def resizeEvent(self, event: Any) -> None:
@@ -616,45 +617,46 @@ class Page3(QWidget):
         self.main_window.threadpool.start(big_huge_process)
 
     def process_frame(self, frames: depth_sensor.interface.frame.CompositeFrame) -> None:
-        # frames = self.hdr_merge.process(frames)
-        # frames = self.temporal_filter.process(frames)
-        # frames = self.spatial_filter.process(frames).as_frameset()
-        # aligned_frames = self.align.process(frames)
-        # color_frame = aligned_frames.get_color_frame()
-        # depth_frame = aligned_frames.get_depth_frame()
+        color_frame = frames.get_color_frame()
+        depth_frame = frames.get_depth_frame()
 
-        # if self.motion_support:
-        #     accel_frame = frames.first_or_default(rs.stream.accel)
-        #     gyro_frame = frames.first_or_default(rs.stream.gyro)
+        accel_frame = None
+        gyro_frame = None
 
-        # if self.motion_support:
-        #     if not color_frame or not accel_frame or not gyro_frame:
-        #         return
-        # else:
-        #     if not color_frame:
-        #         return
+        if self.motion_support and isinstance(frames, ds_rs_frame.CompositeFrame):
+            # I'm lazy
+            accel_frame = frames._internal.first_or_default(rs.stream.accel) # type: ignore
+            gyro_frame = frames._internal.first_or_default(rs.stream.gyro) # type: ignore
 
-        # self.latest_color_frame = color_frame
-        # self.latest_depth_frame = depth_frame
+        if self.motion_support:
+            if not color_frame or not accel_frame or not gyro_frame:
+                return
+        else:
+            if not color_frame:
+                return
 
-        # if self.motion_support:
-        #     accel_data = accel_frame.as_motion_frame().get_motion_data()
-        #     gyro_data = gyro_frame.as_motion_frame().get_motion_data()
+        self.latest_color_frame = color_frame
+        self.latest_depth_frame = depth_frame
 
-        #     # Update Madgwick filter
-        #     # Swap coordinates because the Madgwick expects z to be gravity
-        #     self.Q = self.madgwick.updateIMU(self.Q, gyr=[gyro_data.x, gyro_data.z, -gyro_data.y], acc=[accel_data.x, accel_data.z, -accel_data.y])
-        self.latest_color_frame = frames.get_color_frame()
-        self.latest_depth_frame = frames.get_depth_frame()
+        if self.motion_support:
+            # waste cpu resources because pylance
+            if not accel_frame or not gyro_frame:
+                return
+            accel_data = accel_frame.as_motion_frame().get_motion_data()
+            gyro_data = gyro_frame.as_motion_frame().get_motion_data()
+
+            # Update Madgwick filter
+            # Swap coordinates because the Madgwick expects z to be gravity
+            self.Q = self.madgwick.updateIMU(self.Q, gyr=np.array([gyro_data.x, gyro_data.z, -gyro_data.y]), acc=np.array([accel_data.x, accel_data.z, -accel_data.y])) # type: ignore
 
     def start_data_thread(self) -> None:
-        # if self.data_thread and self.data_thread.running:
+        # if self.main_window.data_thread and self.main_window.data_thread.running:
         #     return
-        # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool, start_pipeline)
-        self.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.HDR_MERGE)
-        self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
+        # self.main_window.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool, start_pipeline)
+        self.main_window.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.HDR_MERGE)
+        self.main_window.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
         self.pipeline.start()
-        # self.main_window.threadpool.start(self.data_thread)
+        # self.main_window.threadpool.start(self.main_window.data_thread)
 
     def closeEvent(self, event: Any) -> None:
         return
