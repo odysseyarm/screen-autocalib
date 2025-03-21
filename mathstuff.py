@@ -272,7 +272,7 @@ def undistort_deproject(
         y: F = yd
         best_err: F = cast(F, np.float32(99999)) # Large initial error
 
-        for _ in range(20):  # Fixed at 20 iterations
+        for _ in range(40):  # Fixed at 40 iterations
             r2: F = x * x + y * y
             r4: F = r2 * r2
             r6: F = r4 * r2
@@ -365,20 +365,23 @@ def project_point_to_pixel_with_distortion(
         # **Brown-Conrady distortion**
         radial: F = (1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6) / (1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6)
         tangential_x: F = 2 * disto.p1 * xn * yn + disto.p2 * (r2 + 2 * xn * xn)
-        tangential_y: F = disto.p1 * (r2 + 2 * yn * yn) + 2 * disto.p2 * xn * yn
+        tangential_y: F = 2 * disto.p2 * xn * yn + disto.p1 * (r2 + 2 * yn * yn)
 
         xd: F = xn * radial + tangential_x
         yd: F = yn * radial + tangential_y
 
     elif intrinsic.model == DistortionModel.INV_BROWN_CONRADY:
         # **Inverse Brown-Conrady distortion**
-        icdist: F = 1.0 / (1.0 + ((disto.k5 * r2 + disto.k2) * r2 + disto.k1) * r2)
+        radial: F = (1 + disto.k1 * r2 + disto.k2 * r4 + disto.k3 * r6) / (1 + disto.k4 * r2 + disto.k5 * r4 + disto.k6 * r6)
+
+        xn = xn * radial
+        yn = yn * radial
+
         tangential_x: F = 2 * disto.p1 * xn * yn + disto.p2 * (r2 + 2 * xn * xn)
         tangential_y: F = 2 * disto.p2 * xn * yn + disto.p1 * (r2 + 2 * yn * yn)
 
-        xd: F = (xn + tangential_x) * icdist
-        yd: F = (yn + tangential_y) * icdist
-
+        xd: F = xn + tangential_x
+        yd: F = yn + tangential_y
     else:
         raise ValueError("Unsupported distortion model")
 
