@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
 
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress) # type: ignore
-        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, screen)
+        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, args.enable_hdr, screen)
         self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, args.enable_hdr)
         self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir, screen, args.screen_diagonal)
 
@@ -60,13 +60,13 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.page5)
 
         if self.bag_file is None and args.source == DepthCameraSource.realsense:
-            self.page1 = Page1(self, lambda: self.init_pipeline(args.enable_hdr), self.exit_application)
+            self.page1 = Page1(self, lambda: self.init_pipeline(), self.exit_application)
             self.stacked_widget.addWidget(self.page1)
             self.stacked_widget.setCurrentWidget(self.page1)
         else:
-            self.init_pipeline(args.enable_hdr)
+            self.init_pipeline()
 
-    def init_pipeline(self, enable_hdr: bool) -> None:
+    def init_pipeline(self) -> None:
         motion_support = False
 
         # Initialize the pipeline
@@ -76,20 +76,42 @@ class MainWindow(QMainWindow):
                 ob_pipeline = pyorbbecsdk.Pipeline()
 
                 device = ob_pipeline.get_device()
-                device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_SHARPNESS_INT, 255)
+                # 100 max for non Astra 2, 255 max for Astra 2
+                device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_SHARPNESS_INT, 100)
                 device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_POWER_LINE_FREQUENCY_INT,  2)
-                # device.set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, False)
-                # device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_GAIN_INT, 1)
-                # device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_EXPOSURE_INT, 4000)
+                device.set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, False)
+                device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_GAIN_INT, 1)
+                device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_EXPOSURE_INT, int(self.args.rgb_exposure))
 
                 profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.COLOR_SENSOR)
-                _color_profile = profile_list.get_video_stream_profile(1920, 0, pyorbbecsdk.OBFormat.RGB, 15)
+                _color_profile = profile_list.get_video_stream_profile(1280, 800, pyorbbecsdk.OBFormat.RGB, 30)
 
-                profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.IR_SENSOR)
-                _ir_profile = profile_list.get_video_stream_profile(1600, 0, pyorbbecsdk.OBFormat.Y8, 15)
+                profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.LEFT_IR_SENSOR)
+                _ir_profile = profile_list.get_video_stream_profile(1280, 800, pyorbbecsdk.OBFormat.Y8, 30)
 
                 profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.DEPTH_SENSOR)
-                _depth_profile = profile_list.get_video_stream_profile(1600, 0, pyorbbecsdk.OBFormat.Y16, 15)
+                _depth_profile = profile_list.get_video_stream_profile(1280, 800, pyorbbecsdk.OBFormat.Y16, 30)
+
+                sensor_list: pyorbbecsdk.SensorList = device.get_sensor_list()
+                try:
+                    gyro_sensor = sensor_list.get_sensor_by_type(pyorbbecsdk.OBSensorType.GYRO_SENSOR)
+                    if gyro_sensor is None:
+                        print("No gyro sensor")
+                    else:
+                        motion_support = True
+                except pyorbbecsdk.OBError as e:
+                    print(e)
+                try:
+                    accel_sensor = sensor_list.get_sensor_by_type(pyorbbecsdk.OBSensorType.ACCEL_SENSOR)
+                    if accel_sensor is None:
+                        print("No accel sensor")
+                    else:
+                        accel_profile_list: pyorbbecsdk.StreamProfileList = accel_sensor.get_stream_profile_list()
+                        accel_profile: pyorbbecsdk.StreamProfile = accel_profile_list.get_stream_profile_by_index(0)
+                        assert accel_profile is not None
+                    motion_support = True
+                except pyorbbecsdk.OBError as e:
+                    print(e)
 
                 config.enable_stream(_color_profile)
                 config.enable_stream(_ir_profile)
@@ -97,9 +119,14 @@ class MainWindow(QMainWindow):
 
                 # config.set_align_mode(pyorbbecsdk.OBAlignMode.SW_MODE)
                 config.set_align_mode(pyorbbecsdk.OBAlignMode.DISABLE)
+                config.set_frame_aggregate_output_mode(pyorbbecsdk.OBFrameAggregateOutputMode.FULL_FRAME_REQUIRE)
 
                 self.pipeline = depth_sensor.orbbec.pipeline.Pipeline(ob_pipeline, config)
-                self.pipeline.start()
+
+                if motion_support:
+                    self.data_thread = DataAcquisitionThread(self.pipeline, self.threadpool, True, accel_sensor, gyro_sensor)
+                else:
+                    self.data_thread = DataAcquisitionThread(self.pipeline, self.threadpool, True)
             case DepthCameraSource.realsense:
                 _pipeline = rs.pipeline()
                 config = rs.config()
@@ -138,12 +165,6 @@ class MainWindow(QMainWindow):
                     _depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
                     if _depth_sensor:
                         _depth_sensor.set_option(rs.option.depth_units, 0.0001)
-                        if enable_hdr:
-                            _depth_sensor.set_option(rs.option.enable_auto_exposure, False)
-                            _depth_sensor.set_option(rs.option.hdr_enabled, True)
-                        else:
-                            _depth_sensor.set_option(rs.option.enable_auto_exposure, True)
-                            _depth_sensor.set_option(rs.option.hdr_enabled, False)
                         _depth_sensor.set_option(rs.option.laser_power, self.args.laser_power)
 
                     _color_sensor = self.pipeline_profile.get_device().first_color_sensor()
@@ -169,15 +190,15 @@ class MainWindow(QMainWindow):
 
                 self.pipeline = depth_sensor.realsense.pipeline.Pipeline(_pipeline, config)
                 self.pipeline._running = True # type: ignore
+
+                self.data_thread = DataAcquisitionThread(self.pipeline, self.threadpool, True)
             case _:
                 raise ValueError("Invalid depth camera source string")
 
-        self.data_thread = DataAcquisitionThread(self.pipeline, self.threadpool, True)
         self.threadpool.start(self.data_thread)
 
         try:
             self.page2.pipeline = self.pipeline
-            self.page2.data_thread = self.data_thread
             self.page3.pipeline = self.pipeline
             self.page3.motion_support = motion_support
             self.page4.pipeline = self.pipeline
@@ -218,6 +239,8 @@ class MainWindow(QMainWindow):
         self.page2.closeEvent(event)
         self.page3.closeEvent(event)
         self.page4.closeEvent(event)
+
+        self.data_thread.stop()
 
         event.accept()
 

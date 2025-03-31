@@ -9,6 +9,7 @@ from typing import Optional
 class Pipeline:
     _internal: pyorbbecsdk.Pipeline
 
+    _hdr_merge_filter: Optional[pyorbbecsdk.HDRMergeFilter] = None
     _noise_removal_filter: Optional[pyorbbecsdk.NoiseRemovalFilter] = None
     _temporal_filter: Optional[pyorbbecsdk.TemporalFilter] = None
     _spatial_filter: Optional[pyorbbecsdk.SpatialAdvancedFilter] = None
@@ -29,7 +30,7 @@ class Pipeline:
             return None
 
         # hack to get around receiving frames when not all streams are ready
-        if frameset.get_color_frame() is None or frameset.get_ir_frame() is None: # type: ignore
+        if frameset.get_color_frame() is None or frameset.get_frame_by_type(pyorbbecsdk.OBFrameType.LEFT_IR_FRAME) is None: # type: ignore
             return None
 
         return frameset
@@ -53,6 +54,17 @@ class Pipeline:
 
     def filters_process(self, frameset: pyorbbecsdk.FrameSet, filters: depth_sensor.interface.pipeline.Filter) -> Optional[pyorbbecsdk.FrameSet]:
         try:
+            if depth_sensor.interface.pipeline.Filter.HDR_MERGE in filters:
+                if self._hdr_merge_filter is None:
+                    self._hdr_merge_filter = pyorbbecsdk.HDRMergeFilter()
+                # not in the docs nor the examples. and for some reason three pushes need to happen for process to return not None
+                self._hdr_merge_filter.push_frame(frameset.get_depth_frame())
+                maybe_frameset = self._hdr_merge_filter.process(frameset)
+                if maybe_frameset is not None:
+                    frameset = maybe_frameset
+                else:
+                    return None
+
             if depth_sensor.interface.pipeline.Filter.NOISE_REMOVAL in filters:
                 if self._noise_removal_filter is None:
                     self._noise_removal_filter = pyorbbecsdk.NoiseRemovalFilter()
@@ -65,17 +77,17 @@ class Pipeline:
                 if self._temporal_filter is None:
                     self._temporal_filter = pyorbbecsdk.TemporalFilter()
                     self._temporal_filter.set_diff_scale(0.1)
-                    self._temporal_filter.set_weight(0.4)
+                    self._temporal_filter.set_weight(0.1)
                 frameset = self._temporal_filter.process(frameset)
 
             if depth_sensor.interface.pipeline.Filter.SPATIAL in filters:
                 if self._spatial_filter is None:
                     self._spatial_filter = pyorbbecsdk.SpatialAdvancedFilter()
                     params = pyorbbecsdk.OBSpatialAdvancedFilterParams()
-                    params.alpha = 0.5
+                    params.alpha = 0.1
                     params.disp_diff = 160
-                    params.magnitude = 1
-                    params.radius = 1
+                    params.magnitude = 5
+                    params.radius = 0
                     self._spatial_filter.set_filter_params(params)
                 frameset = self._spatial_filter.process(frameset)
 
@@ -91,12 +103,20 @@ class Pipeline:
             return None
 
         frameset = frameset.as_frame_set()
-        if frameset.get_color_frame() is None or frameset.get_ir_frame() is None: # type: ignore
+        if frameset.get_color_frame() is None or frameset.get_frame_by_type(pyorbbecsdk.OBFrameType.LEFT_IR_FRAME) is None: # type: ignore
             return None
 
         return frameset
     
     def set_hdr_enabled(self, enabled: bool):
+        hdr_config = pyorbbecsdk.OBHdrConfig()
+        hdr_config.enable = enabled
+        if enabled:
+            hdr_config.exposure_1 = 1000
+            hdr_config.exposure_2 = 10000
+            hdr_config.gain_1 = 16
+            hdr_config.gain_2 = 16
+        self._internal.get_device().set_hdr_config(hdr_config)
         return
 
     def set_ir_exposure(self, exposure: int):

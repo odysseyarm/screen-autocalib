@@ -48,8 +48,6 @@ class Page2(QWidget):
         self.next_page = next_page
         self.main_window_exit_application = exit_application
         self.auto_progress = auto_progress
-        self.pipeline: Optional[pipeline.Pipeline] = None
-        self.data_thread: Optional[DataAcquisitionThread] = None
         self.countdown_timer: Optional[QTimer] = None
         self.remaining_time = 30
         self.init_ui()
@@ -103,7 +101,6 @@ class Page2(QWidget):
         self.timer.start(1000)
 
     def check_realsense_device(self) -> None:
-        print(self.main_window.pipeline)
         if self.main_window.pipeline is not None:
             self.pipeline = self.main_window.pipeline
             self.start_steps()
@@ -111,10 +108,8 @@ class Page2(QWidget):
     def start_steps(self) -> None:
         self.timer.stop()
 
-        assert self.pipeline is not None
-
         # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
-        self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
+        self.main_window.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
         # self.main_window.threadpool.start(self.data_thread)
 
         if self.auto_progress:
@@ -136,8 +131,6 @@ class Page2(QWidget):
     def go_next(self) -> None:
         if self.countdown_timer is not None:
             self.countdown_timer.stop()
-        # if self.data_thread is not None:
-        #     self.data_thread.stop()
         self.next_page()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -150,7 +143,7 @@ class Page2(QWidget):
         color_frame = composite_frame.get_color_frame()
         if not color_frame:
             return
-
+        
         color_frame.set_format(frame.StreamFormat.RGB)
         color_image = cv2.Mat(color_frame.get_data())
 
@@ -164,13 +157,6 @@ class Page2(QWidget):
 
         self.camera_pixmap_item.setOffset(-self.camera_pixmap_item.pixmap().width() / 2, -self.camera_pixmap_item.pixmap().height() / 2)
         self.camera_pixmap_item.setPos(self.canvas.viewport().width() / 2, self.canvas.viewport().height() / 2)
-
-    def stop_data_thread(self) -> None:
-        if self.data_thread and self.data_thread.running:
-            self.data_thread.stop()
-
-    def closeEvent(self, event: QEvent) -> None:
-        self.stop_data_thread()
 
     def exit_application(self) -> None:
         self.main_window_exit_application()

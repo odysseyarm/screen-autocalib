@@ -13,6 +13,8 @@ import quaternion
 from ahrs.filters import Madgwick
 from data_acquisition import DataAcquisitionThread
 import depth_sensor.interface.stream_profile
+import depth_sensor.orbbec
+import depth_sensor.orbbec.pipeline
 from mathstuff import plane_from_points, compute_xy_transformation_matrix, apply_transformation, evaluate_plane, approximate_intersection, calculate_gravity_alignment_matrix, marker_pattern, project_color_pixel_to_depth_pixel, project_point_to_pixel, project_point_to_pixel_with_distortion, undistort_deproject
 from calibration_data import CalibrationData
 import depth_sensor.interface.pipeline
@@ -20,6 +22,7 @@ import depth_sensor.interface.frame
 from depth_sensor.interface import pipeline as ds_pipeline
 from depth_sensor.realsense import frame as ds_rs_frame
 import pyrealsense2 as rs
+import pyorbbecsdk as ob
 
 import matplotlib
 matplotlib.use('Qt5Agg')
@@ -61,7 +64,7 @@ def extract_3d_point(pixel: np.ndarray[Literal[2], np.dtype[np.float32]], intrin
 class Page3(QWidget):
     Q: np.ndarray[Literal[4], np.dtype[np.float32]]
 
-    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: depth_sensor.interface.pipeline.Pipeline, auto_progress: bool, screen: QScreen) -> None:
+    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: depth_sensor.interface.pipeline.Pipeline, auto_progress: bool, enable_hdr: bool, screen: QScreen) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.screen_size = screen.size()
@@ -83,6 +86,9 @@ class Page3(QWidget):
         # self.rows = 7
         self.next_page = next_page
         self.init_ui()
+        self.latest_ob_accel_frame: Optional[ob.AccelFrame] = None
+        self.latest_ob_gyro_frame: Optional[ob.GyroFrame] = None
+        self.enable_hdr = enable_hdr
 
     def init_ui(self) -> None:
         self.stacked_layout = QStackedLayout(self)
@@ -577,11 +583,9 @@ class Page3(QWidget):
                 self.start_next_countdown(success=True)
             self.label.hide()
             self.stacked_layout.setCurrentWidget(self.initial_widget)
-
-            self.start_data_thread()
         else:
-            self.start_data_thread()
             self.fail(err_msg)
+        self.start_data_thread()
 
     def fail(self, msg: Optional[str]) -> None:
         print(f"Detection failure: {msg}")
@@ -628,17 +632,9 @@ class Page3(QWidget):
             accel_frame = frames._internal.first_or_default(rs.stream.accel) # type: ignore
             gyro_frame = frames._internal.first_or_default(rs.stream.gyro) # type: ignore
 
-        if self.motion_support:
             if not color_frame or not accel_frame or not gyro_frame:
                 return
-        else:
-            if not color_frame:
-                return
 
-        self.latest_color_frame = color_frame
-        self.latest_depth_frame = depth_frame
-
-        if self.motion_support:
             # waste cpu resources because pylance
             if not accel_frame or not gyro_frame:
                 return
@@ -648,14 +644,44 @@ class Page3(QWidget):
             # Update Madgwick filter
             # Swap coordinates because the Madgwick expects z to be gravity
             self.Q = self.madgwick.updateIMU(self.Q, gyr=np.array([gyro_data.x, gyro_data.z, -gyro_data.y]), acc=np.array([accel_data.x, accel_data.z, -accel_data.y])) # type: ignore
+        else:
+            if not color_frame:
+                return
+
+        self.latest_color_frame = color_frame
+        self.latest_depth_frame = depth_frame
+
+    def maybe_mad_update(self):
+        a = self.latest_ob_accel_frame
+        g = self.latest_ob_gyro_frame
+        if a is not None and g is not None:
+            # Update Madgwick filter
+            # Swap coordinates because the Madgwick expects z to be gravity
+            self.Q = self.madgwick.updateIMU(self.Q, gyr=np.array([g.get_x(), g.get_z(), -g.get_y()]), acc=np.array([a.get_x(), a.get_z(), -a.get_y()]))
+            a = None
+            g = None
+
+    def ob_accel_updated(self, frame: ob.Frame):
+        self.latest_ob_accel_frame = frame.as_accel_frame()
+        self.maybe_mad_update()
+
+    def ob_gyro_updated(self, frame: ob.Frame):
+        self.latest_ob_gyro_frame = frame.as_gyro_frame()
+        self.maybe_mad_update()
 
     def start_data_thread(self) -> None:
         # if self.main_window.data_thread and self.main_window.data_thread.running:
         #     return
         # self.main_window.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool, start_pipeline)
-        self.main_window.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.HDR_MERGE)
+        if self.enable_hdr:
+            self.main_window.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.HDR_MERGE)
+        else:
+            self.main_window.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL)
         self.main_window.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
+        self.main_window.data_thread.signals.ob_accel_updated.connect(self.ob_accel_updated)
+        self.main_window.data_thread.signals.ob_gyro_updated.connect(self.ob_gyro_updated)
         self.pipeline.start()
+        self.pipeline.set_hdr_enabled(self.enable_hdr)
         # self.main_window.threadpool.start(self.main_window.data_thread)
 
     def closeEvent(self, event: Any) -> None:

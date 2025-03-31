@@ -146,7 +146,7 @@ class Page4(QWidget):
             distances = [np.linalg.norm(point - detected_marker) for detected_marker in detected_markers_3d_aligned]
             closest_index = np.argmin(distances)
             detected_marker_pattern_aligned.append(detected_markers_3d_aligned[closest_index])
-            projected_point = mathstuff.project_point_to_pixel_with_distortion(self.main_window.calibration_data.color_intrinsics, detected_markers_3d_aligned[closest_index])
+            projected_point = mathstuff.project_point_to_pixel_with_distortion(self.main_window.calibration_data.color_intrinsics, np.linalg.inv(self.main_window.calibration_data.align_transform_mtx) @ detected_markers_3d_aligned[closest_index])
             detected_marker_pattern_2d.append(projected_point)
             detected_markers_3d_aligned.pop(closest_index)
 
@@ -178,10 +178,9 @@ class Page4(QWidget):
         self.pipeline.start()
 
         if self.enable_hdr:
-            if self.pipeline.hdr_supported():
-                self.pipeline.set_hdr_enabled(False)
-        else:
-            self.pipeline.set_ir_exposure(self.ir_low_exposure)
+            self.pipeline.set_hdr_enabled(False)
+
+        self.pipeline.set_ir_exposure(int(self.ir_low_exposure))
 
         # self.data_thread = DataAcquisitionThread(self.pipeline, self.main_window.threadpool)
         self.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
@@ -228,11 +227,6 @@ class Page4(QWidget):
 
         self.camera_pixmap_item.setOffset(-self.camera_pixmap_item.pixmap().width() / 2, -self.camera_pixmap_item.pixmap().height() / 2)
         self.camera_pixmap_item.setPos(self.canvas.viewport().width() / 2, self.canvas.viewport().height() / 2)
-
-    def stop_data_thread(self) -> None:
-        # if self.data_thread and self.data_thread.running:
-        #     self.data_thread.stop()
-        return
 
     def closeEvent(self, event: QEvent) -> None:
         return

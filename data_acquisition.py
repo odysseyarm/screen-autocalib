@@ -1,5 +1,5 @@
 from PySide6.QtCore import QRunnable, QThreadPool, Signal, QObject
-from typing import Optional, TypeVar
+from typing import Optional
 import threading
 import time
 
@@ -61,18 +61,46 @@ class FrameProcessor(QRunnable):
             self.filters = filters
 
 class DataAcquisitionThread(QRunnable):
+
+    class Signals(QObject):
+        def __init__(self):
+            super().__init__()
+        ob_accel_updated = Signal(pyorbbecsdk.AccelFrame)
+        ob_gyro_updated = Signal(pyorbbecsdk.GyroFrame)
+
+    signals = Signals()
     threadpool: QThreadPool
     frame_processor: FrameProcessor
     start_pipeline: bool
 
-    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline, threadpool: QThreadPool, start_pipeline: bool = False, parent: Optional[QObject] = None):
-        super().__init__(parent)
+    _ob_accel: Optional[pyorbbecsdk.Sensor] = None
+    _ob_accel_profile: Optional[pyorbbecsdk.StreamProfile] = None
+    _ob_gyro: Optional[pyorbbecsdk.Sensor] = None
+    _ob_gyro_profile: Optional[pyorbbecsdk.StreamProfile] = None
+
+    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline, threadpool: QThreadPool, start_pipeline: bool = False, ob_accel: Optional[pyorbbecsdk.Sensor] = None, ob_gyro: Optional[pyorbbecsdk.Sensor] = None):
+        super().__init__()
         self.daemon = True
         self.pipeline = pipeline
         self.threadpool = threadpool
         self.frame_processor = FrameProcessor(pipeline)
         self.start_pipeline = start_pipeline
         self.running = False
+        if ob_accel is not None:
+            accel_profile_list: pyorbbecsdk.StreamProfileList = ob_accel.get_stream_profile_list()
+            accel_profile: pyorbbecsdk.StreamProfile = accel_profile_list.get_stream_profile_by_index(0)
+            self._ob_accel_profile = accel_profile
+            self._ob_accel = ob_accel
+        if ob_gyro is not None:
+            gyro_profile_list: pyorbbecsdk.StreamProfileList = ob_gyro.get_stream_profile_list()
+            gyro_profile: pyorbbecsdk.StreamProfile = gyro_profile_list.get_stream_profile_by_index(0)
+            self._ob_gyro_profile = gyro_profile
+            self._ob_gyro = ob_gyro
+    
+    def _on_accel_frame_callback(self, frame: pyorbbecsdk.AccelFrame):
+        self.signals.ob_accel_updated.emit(frame)
+    def _on_gyro_frame_callback(self, frame: pyorbbecsdk.GyroFrame):
+        self.signals.ob_gyro_updated.emit(frame)
 
     def run(self):
         self.running = True
@@ -80,6 +108,10 @@ class DataAcquisitionThread(QRunnable):
         if self.start_pipeline:
             print("starting pipeline")
             self.pipeline.start()
+        if self._ob_accel_profile is not None:
+            self._ob_accel.start(self._ob_accel_profile, self._on_accel_frame_callback) # type: ignore
+        if self._ob_gyro_profile is not None:
+            self._ob_gyro.start(self._ob_gyro_profile, self._on_gyro_frame_callback) # type: ignore
         while self.running:
             frames = self.pipeline.try_wait_for_frames()
             if frames is not None:
@@ -89,6 +121,9 @@ class DataAcquisitionThread(QRunnable):
                 pass
 
     def stop(self):
-        return
-    #     self.running = False
-    #     self.frame_processor.stop()
+        self.running = False
+        self.frame_processor.stop()
+        if self._ob_accel is not None:
+            self._ob_accel.stop()
+        if self._ob_gyro is not None:
+            self._ob_gyro.stop()

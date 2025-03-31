@@ -164,4 +164,4 @@ class CompositeFrame:
     def get_infrared_frame(self, index: int = 0) -> depth_sensor.interface.frame.InfraredFrame:
         if index != 0:
             raise ValueError("Only one IR frame is available")
-        return IRFrame(self._internal.get_ir_frame())
+        return IRFrame(self._internal.get_frame_by_type(pyorbbecsdk.OBFrameType.LEFT_IR_FRAME).as_video_frame())
