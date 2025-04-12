@@ -1,7 +1,7 @@
 import enum
-from typing import Optional, Protocol, TypeVar
+from typing import Generic, Optional, Protocol, TypeVar
 
-from . import frame, stream_profile
+from . import frame
 
 import pyorbbecsdk
 import pyrealsense2
@@ -18,7 +18,8 @@ class Filter(enum.Flag):
     SPATIAL = enum.auto()
     ALIGN_D2C = enum.auto()
 
-class Pipeline(Protocol):
+T=TypeVar("T", pyorbbecsdk.FrameSet, pyrealsense2.composite_frame)
+class Pipeline(Protocol, Generic[T]):
     def try_wait_for_frames(self, timeout_ms: int = 5000) -> Optional[pyorbbecsdk.FrameSet|pyrealsense2.composite_frame]:
         ...
     
@@ -28,7 +29,7 @@ class Pipeline(Protocol):
     def stop(self) -> None:
         ...
     
-    def enable_stream(self, stream: Stream, format: frame.StreamFormat) -> None:
+    def enable_stream(self, stream: Stream, format: frame.StreamFormat, framerate: int) -> None:
         ...
 
     def filter_supported(self, filter: Filter) -> bool:
@@ -37,7 +38,6 @@ class Pipeline(Protocol):
     def hdr_supported(self) -> bool:
         ...
 
-    T=TypeVar("T", covariant=True, bound=(pyorbbecsdk.FrameSet|pyrealsense2.composite_frame))
     def filters_process(self, frameset: T, filters: Filter) -> Optional[T]:
         ...
 

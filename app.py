@@ -12,7 +12,7 @@ from page4 import Page4
 from page5 import Page5
 from calibration_data import CalibrationData
 import argparse
-from typing import Optional
+from typing import Any, Optional
 import depth_sensor.interface.pipeline
 import depth_sensor.orbbec.pipeline
 import depth_sensor.realsense.pipeline
@@ -21,7 +21,7 @@ from data_acquisition import DataAcquisitionThread
 import signal
 
 class MainWindow(QMainWindow):
-    pipeline: depth_sensor.interface.pipeline.Pipeline
+    pipeline: depth_sensor.interface.pipeline.Pipeline[Any]
     threadpool: QThreadPool
 
     def __init__(self, args: argparse.Namespace, screen: QScreen) -> None:
@@ -42,16 +42,14 @@ class MainWindow(QMainWindow):
         self.stacked_widget = QStackedWidget()
         self.setCentralWidget(self.stacked_widget)
 
-        self.pipeline = None
-
         self.calibration_data = CalibrationData()
 
         self.threadpool = QThreadPool()
 
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress) # type: ignore
-        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, args.enable_hdr, screen)
-        self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, args.enable_hdr)
+        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, args.enable_hdr, screen) # type: ignore
+        self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, args.enable_hdr) # type: ignore
         self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir, screen, args.screen_diagonal)
 
         self.stacked_widget.addWidget(self.page2)
@@ -95,7 +93,7 @@ class MainWindow(QMainWindow):
                 sensor_list: pyorbbecsdk.SensorList = device.get_sensor_list()
                 try:
                     gyro_sensor = sensor_list.get_sensor_by_type(pyorbbecsdk.OBSensorType.GYRO_SENSOR)
-                    if gyro_sensor is None:
+                    if gyro_sensor is None: # type: ignore
                         print("No gyro sensor")
                     else:
                         motion_support = True
@@ -103,7 +101,7 @@ class MainWindow(QMainWindow):
                     print(e)
                 try:
                     accel_sensor = sensor_list.get_sensor_by_type(pyorbbecsdk.OBSensorType.ACCEL_SENSOR)
-                    if accel_sensor is None:
+                    if accel_sensor is None: # type: ignore
                         print("No accel sensor")
                     else:
                         accel_profile_list: pyorbbecsdk.StreamProfileList = accel_sensor.get_stream_profile_list()
@@ -124,7 +122,7 @@ class MainWindow(QMainWindow):
                 self.pipeline = depth_sensor.orbbec.pipeline.Pipeline(ob_pipeline, config)
 
                 if motion_support:
-                    self.data_thread = DataAcquisitionThread(self.pipeline, self.threadpool, True, accel_sensor, gyro_sensor)
+                    self.data_thread = DataAcquisitionThread(self.pipeline, self.threadpool, True, accel_sensor, gyro_sensor) # type: ignore
                 else:
                     self.data_thread = DataAcquisitionThread(self.pipeline, self.threadpool, True)
             case DepthCameraSource.realsense:
@@ -233,8 +231,7 @@ class MainWindow(QMainWindow):
             instance.quit()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if hasattr(self, 'pipeline') and self.pipeline:
-            self.pipeline.stop()
+        self.pipeline.stop()
 
         self.page2.closeEvent(event)
         self.page3.closeEvent(event)

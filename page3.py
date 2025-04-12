@@ -34,7 +34,7 @@ from matplotlib.figure import Figure
 
 class MainWindow(QWidget):
     data_thread: DataAcquisitionThread
-    pipeline: Optional[depth_sensor.interface.pipeline.Pipeline]
+    pipeline: depth_sensor.interface.pipeline.Pipeline[Any]
     calibration_data: CalibrationData
     threadpool: QThreadPool
 

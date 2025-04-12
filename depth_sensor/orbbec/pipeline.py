@@ -46,8 +46,26 @@ class Pipeline:
             self._running = False
         return
 
-    def enable_stream(self, stream: depth_sensor.interface.pipeline.Stream, format: depth_sensor.interface.pipeline.frame.StreamFormat) -> None:
-        pass
+    def enable_stream(self, stream: depth_sensor.interface.pipeline.Stream, format: depth_sensor.interface.pipeline.frame.StreamFormat, framerate: int) -> None:
+        profile_list = self._internal.get_stream_profile_list(ob_stream_to_ob_sensor_type(stream_to_ob_stream(stream)))
+        profile = profile_list.get_stream_profile_by_format(format_to_ob_format(format), framerate)
+        if profile is None:
+            raise ValueError(f"Unsupported stream type: {stream}")
+        self._config.enable_stream(profile)
+        self.stop()
+        self.start()
+    
+    def filter_supported(self, filter: depth_sensor.interface.pipeline.Filter) -> bool:
+        if filter == depth_sensor.interface.pipeline.Filter.HDR_MERGE:
+            return self.hdr_supported()
+        elif filter == depth_sensor.interface.pipeline.Filter.TEMPORAL:
+            return True
+        elif filter == depth_sensor.interface.pipeline.Filter.SPATIAL:
+            return True
+        elif filter == depth_sensor.interface.pipeline.Filter.ALIGN_D2C:
+            return True
+        else:
+            return False
 
     def hdr_supported(self) -> bool:
         return self._internal.get_device().is_property_supported(pyorbbecsdk.OBPropertyID.OB_STRUCT_DEPTH_HDR_CONFIG, pyorbbecsdk.OBPermissionType.PERMISSION_READ_WRITE)
@@ -122,3 +140,37 @@ class Pipeline:
     def set_ir_exposure(self, exposure: int):
         self._internal.get_device().set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_IR_AUTO_EXPOSURE_BOOL, False)
         self._internal.get_device().set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_IR_EXPOSURE_INT, exposure)
+
+def format_to_ob_format(format: depth_sensor.interface.pipeline.frame.StreamFormat) -> pyorbbecsdk.OBFormat:
+    if format == depth_sensor.interface.pipeline.frame.StreamFormat.RGB:
+        return pyorbbecsdk.OBFormat.RGB
+    elif format == depth_sensor.interface.pipeline.frame.StreamFormat.BGR:
+        return pyorbbecsdk.OBFormat.BGR
+    elif format == depth_sensor.interface.pipeline.frame.StreamFormat.Z16:
+        return pyorbbecsdk.OBFormat.Z16
+    elif format == depth_sensor.interface.pipeline.frame.StreamFormat.Y8:
+        return pyorbbecsdk.OBFormat.Y8
+    elif format == depth_sensor.interface.pipeline.frame.StreamFormat.MJPG:
+        return pyorbbecsdk.OBFormat.MJPG
+    else:
+        raise ValueError(f"Unsupported stream format: {format}")
+
+def stream_to_ob_stream(stream: depth_sensor.interface.pipeline.Stream) -> pyorbbecsdk.OBStreamType:
+    if stream == depth_sensor.interface.pipeline.Stream.COLOR:
+        return pyorbbecsdk.OBStreamType.COLOR_STREAM
+    elif stream == depth_sensor.interface.pipeline.Stream.DEPTH:
+        return pyorbbecsdk.OBStreamType.DEPTH_STREAM
+    elif stream == depth_sensor.interface.pipeline.Stream.INFRARED:
+        return pyorbbecsdk.OBStreamType.LEFT_IR_STREAM
+    else:
+        raise ValueError(f"Unsupported stream type: {stream}")
+
+def ob_stream_to_ob_sensor_type(stream: pyorbbecsdk.OBStreamType) -> pyorbbecsdk.OBSensorType:
+    if stream == pyorbbecsdk.OBStreamType.COLOR_STREAM:
+        return pyorbbecsdk.OBSensorType.COLOR_SENSOR
+    elif stream == pyorbbecsdk.OBStreamType.DEPTH_STREAM:
+        return pyorbbecsdk.OBSensorType.DEPTH_SENSOR
+    elif stream == pyorbbecsdk.OBStreamType.LEFT_IR_STREAM:
+        return pyorbbecsdk.OBSensorType.LEFT_IR_SENSOR
+    else:
+        raise ValueError(f"Unsupported stream type: {stream}")

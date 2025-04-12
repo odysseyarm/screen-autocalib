@@ -14,12 +14,12 @@ from depth_sensor.interface import pipeline as ds_pipeline
 from depth_sensor.interface import frame as ds_frame
 
 class MainWindow(QWidget):
-    pipeline: Optional[ds_pipeline.Pipeline]
+    pipeline: ds_pipeline.Pipeline[Any]
     threadpool: QThreadPool
     calibration_data: CalibrationData
 
 class Page4(QWidget):
-    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: ds_pipeline.Pipeline, auto_progress: bool, ir_low_exposure: float, enable_hdr: bool) -> None:
+    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: ds_pipeline.Pipeline[Any], auto_progress: bool, ir_low_exposure: float, enable_hdr: bool) -> None:
         super().__init__(parent)
         self.enable_hdr = enable_hdr
         self.main_window = parent

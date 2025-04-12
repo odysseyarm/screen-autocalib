@@ -1,7 +1,5 @@
 import pyrealsense2 as rs
-import depth_sensor.interface.frame
 import depth_sensor.interface.pipeline
-from . import frame
 import typing
 
 class Pipeline:
@@ -42,6 +40,26 @@ class Pipeline:
             self._internal.stop()
             self._running = False
         return
+
+    def enable_stream(self, stream: depth_sensor.interface.pipeline.Stream, format: depth_sensor.interface.pipeline.frame.StreamFormat, framerate: int = 30) -> None:
+        if stream == depth_sensor.interface.pipeline.Stream.COLOR:
+            self._config.enable_stream(rs.stream.color, format_to_rs_format(format), framerate)
+        elif stream == depth_sensor.interface.pipeline.Stream.DEPTH:
+            self._config.enable_stream(rs.stream.depth, format_to_rs_format(format), framerate)
+        elif stream == depth_sensor.interface.pipeline.Stream.INFRARED:
+            self._config.enable_stream(rs.stream.infrared, format_to_rs_format(format), framerate)
+        else:
+            raise ValueError(f"Unsupported stream type: {stream}")
+    
+    def filter_supported(self, filter: depth_sensor.interface.pipeline.Filter) -> bool:
+        if filter == depth_sensor.interface.pipeline.Filter.HDR_MERGE:
+            return self.hdr_supported()
+        elif filter == depth_sensor.interface.pipeline.Filter.TEMPORAL:
+            return True
+        elif filter == depth_sensor.interface.pipeline.Filter.SPATIAL:
+            return True
+        else:
+            return False
 
     def filters_process(self, frameset: rs.composite_frame, filters: depth_sensor.interface.pipeline.Filter) -> typing.Optional[rs.composite_frame]:
         if depth_sensor.interface.pipeline.Filter.HDR_MERGE in filters:
@@ -88,3 +106,17 @@ class Pipeline:
         if not depth_sensor.is_option_read_only(rs.option.exposure):
             depth_sensor.set_option(rs.option.enable_auto_exposure, False)
             depth_sensor.set_option(rs.option.exposure, exposure)
+
+def format_to_rs_format(format: depth_sensor.interface.pipeline.frame.StreamFormat) -> rs.format:
+    if format == depth_sensor.interface.pipeline.frame.StreamFormat.RGB:
+        return rs.format.rgb8
+    elif format == depth_sensor.interface.pipeline.frame.StreamFormat.BGR:
+        return rs.format.bgr8
+    elif format == depth_sensor.interface.pipeline.frame.StreamFormat.Z16:
+        return rs.format.z16
+    elif format == depth_sensor.interface.pipeline.frame.StreamFormat.Y8:
+        return rs.format.y8
+    elif format == depth_sensor.interface.pipeline.frame.StreamFormat.MJPG:
+        return rs.format.mjpeg
+    else:
+        raise ValueError(f"Unsupported stream format: {format}")
