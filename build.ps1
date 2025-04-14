@@ -11,12 +11,14 @@ py -3.11 -m venv .venv
 . .\.venv\Scripts\Activate.ps1
 
 # Upgrade pip and install requirements
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+# Do this through UV instead before runnning this script
+# python -m pip install --upgrade pip
+# python -m pip install -r requirements.txt
 
 # For Windows, ahrs/utils should be located in:
 #     .venv\Lib\site-packages\ahrs\utils
 $AHRS_UTILS_PATH = "./.venv/Lib/site-packages/ahrs/utils"
+$OB_EXTENSIONS_PATH = "./.venv/Lib/site-packages/extensions"
 # Confirm that directory exists
 if (-not (Test-Path $AHRS_UTILS_PATH)) {
     Write-Error "Could not find 'ahrs/utils' in .venv/Lib/site-packages. Make sure AHRS is installed."
@@ -24,7 +26,7 @@ if (-not (Test-Path $AHRS_UTILS_PATH)) {
 }
 
 # Build with PyInstaller, adding the data folder
-python -m PyInstaller --add-data "$AHRS_UTILS_PATH;ahrs/utils" app.py
+python -m PyInstaller --add-data "$AHRS_UTILS_PATH;ahrs/utils" --add-data "$OB_EXTENSIONS_PATH;extensions" app.py
 
 # Create the tar.gz archive (requires tar in PATH)
 tar -czvf dist/dist.tar.gz dist/app

@@ -1,6 +1,7 @@
 from typing import Callable
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QKeySequence
 
 class Page1(QWidget):
     def __init__(self, parent: QWidget, next_page: Callable[[], None], exit_application: Callable[[], None]) -> None:
@@ -19,10 +20,12 @@ class Page1(QWidget):
 
         self.retry_button = QPushButton("Retry")
         self.retry_button.clicked.connect(self.check_camera_connection)
+        self.retry_button.setShortcut(QKeySequence("Ctrl+R"))
         layout.addWidget(self.retry_button)
 
         self.exit_button = QPushButton("Exit")
         self.exit_button.clicked.connect(self.exit_application)
+        self.exit_button.setShortcut(QKeySequence("Ctrl+Q"))
         layout.addWidget(self.exit_button)
 
         self.check_camera_connection()

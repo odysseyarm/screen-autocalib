@@ -13,8 +13,6 @@ import depth_sensor.orbbec.frame
 import depth_sensor.realsense
 import depth_sensor.realsense.frame
 
-from copy import deepcopy
-
 class FrameProcessor(QRunnable):
 
     class Signals(QObject):
@@ -58,7 +56,7 @@ class FrameProcessor(QRunnable):
         with self.lock:
             self.running = False
             self.latest_frameset = None
-    
+
     def set_filters(self, filters: Optional[depth_sensor.interface.pipeline.Filter]):
         with self.lock:
             self.filters = filters

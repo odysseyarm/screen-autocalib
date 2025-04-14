@@ -3,7 +3,7 @@ import numpy.typing as npt
 import cv2
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
 from PySide6.QtCore import Qt, QObject, QRunnable, QTimer, QThreadPool, Signal
-from PySide6.QtGui import QCursor, QImage, QPixmap, QScreen
+from PySide6.QtGui import QCursor, QImage, QKeySequence, QScreen, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
 from platformdirs import user_data_dir
 import io
@@ -104,15 +104,18 @@ class Page3(QWidget):
 
         self.go_button = QPushButton("Go")
         self.go_button.clicked.connect(self.on_go_clicked)
+        self.go_button.setShortcut(QKeySequence("Ctrl+G"))
         self.initial_layout.addWidget(self.go_button)
 
         self.next_button = QPushButton("Next")
         self.next_button.setEnabled(False)
         self.next_button.clicked.connect(self.go_next)
+        self.next_button.setShortcut(QKeySequence("Ctrl+N"))
         self.initial_layout.addWidget(self.next_button)
 
         self.exit_button = QPushButton("Exit")
         self.exit_button.clicked.connect(self.exit_application)
+        self.exit_button.setShortcut(QKeySequence("Ctrl+Q"))
         self.initial_layout.addWidget(self.exit_button)
 
         self.stacked_layout.addWidget(self.initial_widget)
@@ -676,7 +679,11 @@ class Page3(QWidget):
         if self.enable_hdr:
             self.main_window.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL | ds_pipeline.Filter.HDR_MERGE)
         else:
-            self.main_window.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL)
+            if isinstance(self.pipeline, depth_sensor.orbbec.pipeline.Pipeline):
+                # the rest of the filters make it pretty inaccurate lol
+                self.main_window.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL)
+            else:
+                self.main_window.data_thread.frame_processor.set_filters(ds_pipeline.Filter.NOISE_REMOVAL | ds_pipeline.Filter.TEMPORAL | ds_pipeline.Filter.SPATIAL)
         self.main_window.data_thread.frame_processor.signals.data_updated.connect(self.process_frame)
         self.main_window.data_thread.signals.ob_accel_updated.connect(self.ob_accel_updated)
         self.main_window.data_thread.signals.ob_gyro_updated.connect(self.ob_gyro_updated)

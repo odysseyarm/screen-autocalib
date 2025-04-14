@@ -1,14 +1,14 @@
-from typing import Callable, Optional
-import numpy as np
+from typing import Any, Callable, Optional
 import cv2
-from PySide6.QtCore import QTimer, Qt, QEvent, QThreadPool
-from PySide6.QtGui import QImage, QPixmap, QPen, QPainter, QPaintEvent, QResizeEvent
+from PySide6.QtCore import QTimer, Qt, QThreadPool
+from PySide6.QtGui import QImage, QKeySequence, QPixmap, QPen, QPainter, QPaintEvent, QResizeEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QHBoxLayout, QLabel
 from data_acquisition import DataAcquisitionThread
 from depth_sensor.interface import frame, pipeline
 
 class MainWindow(QWidget):
-    pipeline: Optional[pipeline.Pipeline]
+    data_thread: DataAcquisitionThread
+    pipeline: Optional[pipeline.Pipeline[Any]]
     threadpool: QThreadPool
 
 class BracketOverlay(QWidget):
@@ -77,10 +77,12 @@ class Page2(QWidget):
         button_layout = QHBoxLayout()
         self.next_button = QPushButton("Next")
         self.next_button.clicked.connect(self.go_next)
+        self.next_button.setShortcut(QKeySequence("Ctrl+N"))
         button_layout.addWidget(self.next_button)
 
         self.exit_button = QPushButton("Exit")
         self.exit_button.clicked.connect(self.exit_application)
+        self.exit_button.setShortcut(QKeySequence("Ctrl+Q"))
         button_layout.addWidget(self.exit_button)
 
         if self.auto_progress:
@@ -131,6 +133,7 @@ class Page2(QWidget):
     def go_next(self) -> None:
         if self.countdown_timer is not None:
             self.countdown_timer.stop()
+        self.main_window.data_thread.frame_processor.signals.data_updated.disconnect()
         self.next_page()
 
     def resizeEvent(self, event: QResizeEvent) -> None:

@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Callable, Optional
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap, QScreen
+from PySide6.QtGui import QImage, QKeySequence, QPixmap, QScreen
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 import cv2
 import quaternion
@@ -48,10 +48,12 @@ class Page5(QWidget):
 
         self.done_button = QPushButton("Done")
         self.done_button.clicked.connect(self.save_and_exit)
+        self.done_button.setShortcut(QKeySequence("Ctrl+Return"))
         self.results_layout.addWidget(self.done_button)
 
         self.exit_button = QPushButton("Exit")
         self.exit_button.clicked.connect(self.exit_application)
+        self.exit_button.setShortcut(QKeySequence("Ctrl+Q"))
         self.results_layout.addWidget(self.exit_button)
 
         if self.auto_progress:

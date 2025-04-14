@@ -2,7 +2,7 @@ import cv2
 import pyrealsense2 as rs
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
 from PySide6.QtCore import QTimer, Qt, QEvent, QThreadPool
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QHBoxLayout, QLabel
 from platformdirs import user_data_dir
 from pathlib import Path
@@ -59,10 +59,12 @@ class Page4(QWidget):
         button_layout = QHBoxLayout()
         self.next_button = QPushButton("Next")
         self.next_button.clicked.connect(self.next)
+        self.next_button.setShortcut(QKeySequence("Ctrl+N"))
         button_layout.addWidget(self.next_button)
 
         self.exit_button = QPushButton("Exit")
         self.exit_button.clicked.connect(self.exit_application)
+        self.exit_button.setShortcut(QKeySequence("Ctrl+Q"))
         button_layout.addWidget(self.exit_button)
 
         if self.auto_progress:
