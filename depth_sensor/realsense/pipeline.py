@@ -107,6 +107,9 @@ class Pipeline:
             depth_sensor.set_option(rs.option.enable_auto_exposure, False)
             depth_sensor.set_option(rs.option.exposure, exposure)
 
+    def is_running(self) -> bool:
+        return self._running
+
 def format_to_rs_format(format: depth_sensor.interface.pipeline.frame.StreamFormat) -> rs.format:
     if format == depth_sensor.interface.pipeline.frame.StreamFormat.RGB:
         return rs.format.rgb8

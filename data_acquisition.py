@@ -1,5 +1,5 @@
 from PySide6.QtCore import QRunnable, QThreadPool, Signal, QObject
-from typing import Optional
+from typing import Any, Optional
 import threading
 import time
 
@@ -13,6 +13,8 @@ import depth_sensor.orbbec.frame
 import depth_sensor.realsense
 import depth_sensor.realsense.frame
 
+from copy import deepcopy
+
 class FrameProcessor(QRunnable):
 
     class Signals(QObject):
@@ -23,7 +25,7 @@ class FrameProcessor(QRunnable):
     signals = Signals()
     filters: Optional[depth_sensor.interface.pipeline.Filter] = None
 
-    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline):
+    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline[Any]):
         super().__init__()
         self.daemon = True
         self.latest_frameset = None
@@ -45,7 +47,8 @@ class FrameProcessor(QRunnable):
                         else:
                             self.signals.data_updated.emit(depth_sensor.realsense.frame.CompositeFrame(processed_frameset))
                     self.latest_frameset = None
-            time.sleep(0.001)
+                else:
+                    time.sleep(0.001)
 
     def update_frame(self, frameset: pyorbbecsdk.FrameSet|pyrealsense2.composite_frame):
         with self.lock:
@@ -78,7 +81,7 @@ class DataAcquisitionThread(QRunnable):
     _ob_gyro: Optional[pyorbbecsdk.Sensor] = None
     _ob_gyro_profile: Optional[pyorbbecsdk.StreamProfile] = None
 
-    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline, threadpool: QThreadPool, start_pipeline: bool = False, ob_accel: Optional[pyorbbecsdk.Sensor] = None, ob_gyro: Optional[pyorbbecsdk.Sensor] = None):
+    def __init__(self, pipeline: depth_sensor.interface.pipeline.Pipeline[Any], threadpool: QThreadPool, start_pipeline: bool = False, ob_accel: Optional[pyorbbecsdk.Sensor] = None, ob_gyro: Optional[pyorbbecsdk.Sensor] = None):
         super().__init__()
         self.daemon = True
         self.pipeline = pipeline
@@ -113,9 +116,12 @@ class DataAcquisitionThread(QRunnable):
         if self._ob_gyro_profile is not None:
             self._ob_gyro.start(self._ob_gyro_profile, self._on_gyro_frame_callback) # type: ignore
         while self.running:
-            frames = self.pipeline.try_wait_for_frames()
+            if not self.pipeline.is_running():
+                time.sleep(0.1)
+                continue
+            frames = self.pipeline.try_wait_for_frames(10)
             if frames is not None:
-                self.frame_processor.latest_frameset = frames
+                self.frame_processor.update_frame(frames)
             else:
                 # print("Failed to get frames (is pipeline running?)")
                 pass

@@ -48,8 +48,8 @@ class MainWindow(QMainWindow):
 
         # Create instances of pages
         self.page2 = Page2(self, self.goto_page3, self.exit_application, args.auto_progress) # type: ignore
-        self.page3 = Page3(self, self.goto_page4, self.exit_application, self.pipeline, args.auto_progress, args.enable_hdr, screen) # type: ignore
-        self.page4 = Page4(self, self.goto_page5, self.exit_application, self.pipeline, args.auto_progress, args.ir_low_exposure, args.enable_hdr) # type: ignore
+        self.page3 = Page3(self, self.goto_page4, self.exit_application, args.auto_progress, args.enable_hdr, screen) # type: ignore
+        self.page4 = Page4(self, self.goto_page5, self.exit_application, args.auto_progress, args.ir_low_exposure, args.enable_hdr) # type: ignore
         self.page5 = Page5(self, self.exit_application, args.auto_progress, args.screen, args.dir, screen, args.screen_diagonal)
 
         self.stacked_widget.addWidget(self.page2)
@@ -198,8 +198,8 @@ class MainWindow(QMainWindow):
         try:
             self.page2.pipeline = self.pipeline
             self.page3.pipeline = self.pipeline
-            self.page3.motion_support = motion_support
             self.page4.pipeline = self.pipeline
+            self.page3.motion_support = motion_support
             self.page4.data_thread = self.data_thread
 
             self.goto_page2()

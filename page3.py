@@ -62,15 +62,15 @@ def extract_3d_point(pixel: np.ndarray[Literal[2], np.dtype[np.float32]], intrin
         return np.array([depth*x, depth*y, depth])
 
 class Page3(QWidget):
+    pipeline: depth_sensor.interface.pipeline.Pipeline[Any]
     Q: np.ndarray[Literal[4], np.dtype[np.float32]]
 
-    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: depth_sensor.interface.pipeline.Pipeline, auto_progress: bool, enable_hdr: bool, screen: QScreen) -> None:
+    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], auto_progress: bool, enable_hdr: bool, screen: QScreen) -> None:
         super().__init__(parent)
         self.main_window = parent
         self.screen_size = screen.size()
         self.main_window_exit_application = exit_application
         self.motion_support = False
-        self.pipeline = pipeline
         self.auto_progress = auto_progress
         self.go_countdown_time = 3
         self.next_countdown_time = 5

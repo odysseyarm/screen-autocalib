@@ -19,13 +19,14 @@ class MainWindow(QWidget):
     calibration_data: CalibrationData
 
 class Page4(QWidget):
-    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], pipeline: ds_pipeline.Pipeline[Any], auto_progress: bool, ir_low_exposure: float, enable_hdr: bool) -> None:
+    pipeline: ds_pipeline.Pipeline[Any]
+
+    def __init__(self, parent: MainWindow, next_page: Callable[[], None], exit_application: Callable[[], None], auto_progress: bool, ir_low_exposure: float, enable_hdr: bool) -> None:
         super().__init__(parent)
         self.enable_hdr = enable_hdr
         self.main_window = parent
         self.exit_application = exit_application
         self.motion_support = False
-        self.pipeline = pipeline
         self.pipeline_profile = None
         self.auto_progress = auto_progress
         self.countdown_timer: Optional[QTimer] = None

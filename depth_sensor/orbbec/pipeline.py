@@ -44,7 +44,6 @@ class Pipeline:
         if self._running:
             self._internal.stop()
             self._running = False
-        return
 
     def enable_stream(self, stream: depth_sensor.interface.pipeline.Stream, format: depth_sensor.interface.pipeline.frame.StreamFormat, framerate: int) -> None:
         profile_list = self._internal.get_stream_profile_list(ob_stream_to_ob_sensor_type(stream_to_ob_stream(stream)))
@@ -135,11 +134,13 @@ class Pipeline:
             hdr_config.gain_1 = 16
             hdr_config.gain_2 = 16
         self._internal.get_device().set_hdr_config(hdr_config)
-        return
 
     def set_ir_exposure(self, exposure: int):
         self._internal.get_device().set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_IR_AUTO_EXPOSURE_BOOL, False)
         self._internal.get_device().set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_IR_EXPOSURE_INT, exposure)
+
+    def is_running(self) -> bool:
+        return self._running
 
 def format_to_ob_format(format: depth_sensor.interface.pipeline.frame.StreamFormat) -> pyorbbecsdk.OBFormat:
     if format == depth_sensor.interface.pipeline.frame.StreamFormat.RGB:

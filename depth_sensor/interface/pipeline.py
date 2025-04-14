@@ -46,3 +46,6 @@ class Pipeline(Protocol, Generic[T]):
 
     def set_ir_exposure(self, exposure: int):
         ...
+
+    def is_running(self) -> bool:
+        ...
