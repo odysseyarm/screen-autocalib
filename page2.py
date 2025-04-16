@@ -103,7 +103,7 @@ class Page2(QWidget):
         self.timer.start(1000)
 
     def check_realsense_device(self) -> None:
-        if self.main_window.pipeline is not None:
+        if hasattr(self.main_window, 'pipeline') and self.main_window.pipeline is not None:
             self.pipeline = self.main_window.pipeline
             self.start_steps()
 

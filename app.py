@@ -147,7 +147,7 @@ class MainWindow(QMainWindow):
                             if sensor.is_motion_sensor(): # type: ignore
                                 motion_support = True
 
-                    config.enable_stream(rs.stream.color, 1280, 800, rs.format.bgr8, 15)
+                    config.enable_stream(rs.stream.color, 1280, 800, rs.format.rgb8, 15)
                     config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 15)
                     config.enable_stream(rs.stream.infrared, 1, 848, 480, rs.format.y8, 15)
 

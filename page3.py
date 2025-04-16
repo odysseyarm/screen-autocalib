@@ -225,7 +225,7 @@ class Page3(QWidget):
             charuco_parameters = cv2.aruco.CharucoParameters()
             charuco_detector = cv2.aruco.CharucoDetector(board, charuco_parameters, detector_parameters)
 
-            gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+            gray = cv2.cvtColor(color_image, cv2.COLOR_RGB2GRAY)
             charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
             if charuco_ids is None:
                 self.signals.myFinished.emit(False, "No ChArUco board detected.", calibration_data)
