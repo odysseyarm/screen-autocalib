@@ -20,6 +20,20 @@ from data_acquisition import DataAcquisitionThread
 
 import signal
 
+def best_video_stream_profile(profile_list: pyorbbecsdk.StreamProfileList, format: pyorbbecsdk.OBFormat, fps: int) -> pyorbbecsdk.VideoStreamProfile:
+    """Pick the highest-resolution profile matching format and fps."""
+    best: Optional[pyorbbecsdk.VideoStreamProfile] = None
+    for i in range(profile_list.get_count()):
+        profile = profile_list.get_stream_profile_by_index(i).as_video_stream_profile()
+        if profile.get_format() != format or profile.get_fps() != fps:
+            continue
+        if best is None or profile.get_width() * profile.get_height() > best.get_width() * best.get_height():
+            best = profile
+    if best is None:
+        raise ValueError(f"No video stream profile with format {format} @{fps}fps")
+    print(f"Selected profile: {best.get_width()}x{best.get_height()} {format} @{fps}fps")
+    return best
+
 class MainWindow(QMainWindow):
     pipeline: depth_sensor.interface.pipeline.Pipeline[Any]
     threadpool: QThreadPool
@@ -80,15 +94,18 @@ class MainWindow(QMainWindow):
                 device.set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, False)
                 device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_GAIN_INT, 1)
                 device.set_int_property(pyorbbecsdk.OBPropertyID.OB_PROP_COLOR_EXPOSURE_INT, int(self.args.rgb_exposure))
+                # settings persist in camera across sessions; reset IR AE so pages 2-3
+                # don't inherit the low marker-capture exposure page4 left behind
+                device.set_bool_property(pyorbbecsdk.OBPropertyID.OB_PROP_IR_AUTO_EXPOSURE_BOOL, True)
 
                 profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.COLOR_SENSOR)
-                _color_profile = profile_list.get_video_stream_profile(1280, 800, pyorbbecsdk.OBFormat.RGB, 30)
+                _color_profile = best_video_stream_profile(profile_list, pyorbbecsdk.OBFormat.RGB, 30)
 
                 profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.LEFT_IR_SENSOR)
-                _ir_profile = profile_list.get_video_stream_profile(1280, 800, pyorbbecsdk.OBFormat.Y8, 30)
+                _ir_profile = best_video_stream_profile(profile_list, pyorbbecsdk.OBFormat.Y8, 30)
 
                 profile_list = ob_pipeline.get_stream_profile_list(pyorbbecsdk.OBSensorType.DEPTH_SENSOR)
-                _depth_profile = profile_list.get_video_stream_profile(1280, 800, pyorbbecsdk.OBFormat.Y16, 30)
+                _depth_profile = best_video_stream_profile(profile_list, pyorbbecsdk.OBFormat.Y16, 30)
 
                 sensor_list: pyorbbecsdk.SensorList = device.get_sensor_list()
                 try:

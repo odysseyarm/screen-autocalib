@@ -89,6 +89,7 @@ class Pipeline:
                     params.disp_diff = 256
                     params.max_size = 80
                     self._noise_removal_filter.set_filter_params(params)
+                frameset = self._noise_removal_filter.process(frameset)
 
             if depth_sensor.interface.pipeline.Filter.TEMPORAL in filters:
                 if self._temporal_filter is None:
