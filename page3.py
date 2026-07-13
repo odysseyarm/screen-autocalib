@@ -4,7 +4,7 @@ import cv2
 from typing import Any, List, Dict, Literal, Tuple, Callable, Optional, cast
 from PySide6.QtCore import Qt, QObject, QRunnable, QTimer, QThreadPool, Signal
 from PySide6.QtGui import QCursor, QImage, QKeySequence, QScreen, QPixmap
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPushButton, QStackedLayout
+from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QProgressBar, QPushButton, QStackedLayout
 from platformdirs import user_data_dir
 import io
 import json
@@ -78,6 +78,7 @@ class Page3(QWidget):
         self.countdown_timer: Optional[QTimer] = None
         self.latest_color_frame: Optional[depth_sensor.interface.frame.ColorFrame] = None
         self.latest_depth_frame: Optional[depth_sensor.interface.frame.DepthFrame] = None
+        self.last_fail_msg: Optional[str] = None
         self.madgwick = Madgwick(gain=0.5)
         self.Q = np.array([1.0, 0.0, 0.0, 0.0])
         self.cols = 30
@@ -100,6 +101,7 @@ class Page3(QWidget):
 
         self.instructions_label = QLabel("Press 'Go' to display the ChArUco board. It will disappear after 3 seconds.")
         self.instructions_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.instructions_label.setWordWrap(True)
         self.initial_layout.addWidget(self.instructions_label)
 
         self.go_button = QPushButton("Go")
@@ -130,6 +132,23 @@ class Page3(QWidget):
         self.charuco_layout.addWidget(self.label)
 
         self.stacked_layout.addWidget(self.charuco_widget)
+
+        # Layout for showing progress while calibration math runs
+        self.progress_layout = QVBoxLayout()
+        self.progress_widget = QWidget()
+        self.progress_widget.setLayout(self.progress_layout)
+
+        self.progress_label = QLabel("Board captured — processing...")
+        self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_layout.addWidget(self.progress_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 5)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_layout.addWidget(self.progress_bar)
+
+        self.stacked_layout.addWidget(self.progress_widget)
 
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
@@ -164,7 +183,7 @@ class Page3(QWidget):
         if success:
             self.instructions_label.setText(f"Next in {self.next_countdown_time}")
         else:
-            self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.next_countdown_time}")
+            self.instructions_label.setText(f"Autocalibration unsuccessful: {self.last_fail_msg} Exiting in {self.next_countdown_time}")
 
         if self.next_countdown_time <= 0:
             if success:
@@ -203,6 +222,7 @@ class Page3(QWidget):
             def __init__(self):
                 super().__init__()
             myFinished = Signal(bool, str, CalibrationData)
+            progress = Signal(int, str)
 
         signals: Signals
 
@@ -212,6 +232,8 @@ class Page3(QWidget):
 
         def run(self):
             calibration_data: CalibrationData = CalibrationData()
+
+            self.signals.progress.emit(0, "Detecting ChArUco board corners...")
 
             color_image = np.asanyarray(self.color_frame.get_data())
 
@@ -232,6 +254,7 @@ class Page3(QWidget):
                 return
             
             print("finished step 1/5")
+            self.signals.progress.emit(1, "Computing board homography...")
 
             # For visualization, draw the detected corners on the color image.
             charuco_corners_depth_aligned = charuco_corners
@@ -290,6 +313,7 @@ class Page3(QWidget):
                 return
 
             print("finished step 2/5")
+            self.signals.progress.emit(2, "Gathering 3D points from the screen region...")
 
             # ------------------------------
             # Step 3. Define the board region in the raw depth image.
@@ -361,6 +385,7 @@ class Page3(QWidget):
                 return
 
             print("finished step 3/5")
+            self.signals.progress.emit(3, "Fitting plane to the screen surface...")
 
             # # for debugging
             # self.page3.fail("debugging")
@@ -401,6 +426,7 @@ class Page3(QWidget):
             print("Max error of plane fit: ", plane_max_error)
 
             print("finished step 4/5")
+            self.signals.progress.emit(4, "Computing screen corners...")
 
             # ------------------------------
             # Step 6. Align the fitted plane with gravity.
@@ -551,6 +577,7 @@ class Page3(QWidget):
             calibration_data.best_quad_2d = np.array(calibration_data.best_quad_2d, dtype=np.int32)
 
             print("finished step 5/5")
+            self.signals.progress.emit(5, "Calibration computed.")
 
             self.signals.myFinished.emit(True, "", calibration_data)
 
@@ -576,14 +603,17 @@ class Page3(QWidget):
         self.label.setPixmap(pixmap)
 
     def big_huge_process_finished(self, success: bool, err_msg: str, calibration_data: CalibrationData):
-        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.ArrowCursor));
+        # cursor already restored when capture completed; pop any leftover override
+        QApplication.restoreOverrideCursor()
         if success:
             self.main_window.calibration_data = calibration_data
 
-            self.instructions_label.setText(f"Next in {self.next_countdown_time}")
-            self.next_button.setEnabled(True)
             if self.auto_progress:
+                self.instructions_label.setText(f"Next in {self.next_countdown_time}")
                 self.start_next_countdown(success=True)
+            else:
+                self.instructions_label.setText("Calibration successful. Press 'Next' to continue.")
+            self.next_button.setEnabled(True)
             self.label.hide()
             self.stacked_layout.setCurrentWidget(self.initial_widget)
         else:
@@ -592,9 +622,12 @@ class Page3(QWidget):
 
     def fail(self, msg: Optional[str]) -> None:
         print(f"Detection failure: {msg}")
-        self.instructions_label.setText(f"Autocalibration unsuccessful. Exiting in {self.next_countdown_time}")
+        self.last_fail_msg = msg
         if self.auto_progress:
+            self.instructions_label.setText(f"Autocalibration unsuccessful: {msg} Exiting in {self.next_countdown_time}")
             self.start_next_countdown(success=False)
+        else:
+            self.instructions_label.setText(f"Autocalibration unsuccessful: {msg} Press 'Go' to retry.")
         self.label.hide()
         self.stacked_layout.setCurrentWidget(self.initial_widget)
 
@@ -620,8 +653,21 @@ class Page3(QWidget):
 
         self.pipeline.stop()
 
+        # Board is captured: drop the fullscreen board, restore the cursor and
+        # show progress while the math runs in the background.
+        QApplication.restoreOverrideCursor()
+        self.label.hide()
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Board captured — processing...")
+        self.stacked_layout.setCurrentWidget(self.progress_widget)
+
+        big_huge_process.signals.progress.connect(self.update_progress)
         big_huge_process.signals.myFinished.connect(self.big_huge_process_finished)
         self.main_window.threadpool.start(big_huge_process)
+
+    def update_progress(self, step: int, status: str) -> None:
+        self.progress_bar.setValue(step)
+        self.progress_label.setText(status)
 
     def process_frame(self, frames: depth_sensor.interface.frame.CompositeFrame) -> None:
         color_frame = frames.get_color_frame()
