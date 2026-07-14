@@ -5,7 +5,7 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('./.venv/Lib/site-packages/ahrs/utils', 'ahrs/utils'), ('./.venv/Lib/site-packages/extensions', 'extensions')],
+    datas=[('./.venv/Lib/site-packages/ahrs/utils', 'ahrs/utils'), ('./.venv/Lib/site-packages/pyorbbecsdk/extensions', 'pyorbbecsdk/extensions')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

@@ -18,15 +18,16 @@ py -3.11 -m venv .venv
 # For Windows, ahrs/utils should be located in:
 #     .venv\Lib\site-packages\ahrs\utils
 $AHRS_UTILS_PATH = "./.venv/Lib/site-packages/ahrs/utils"
-$OB_EXTENSIONS_PATH = "./.venv/Lib/site-packages/extensions"
+$OB_EXTENSIONS_PATH = "./.venv/Lib/site-packages/pyorbbecsdk/extensions"
 # Confirm that directory exists
-if (-not (Test-Path $AHRS_UTILS_PATH)) {
+if (-not (Test-Path $AHRS_UTILS_PATH))
+{
     Write-Error "Could not find 'ahrs/utils' in .venv/Lib/site-packages. Make sure AHRS is installed."
-        exit 1
+    exit 1
 }
 
 # Build with PyInstaller, adding the data folder
-python -m PyInstaller --add-data "$AHRS_UTILS_PATH;ahrs/utils" --add-data "$OB_EXTENSIONS_PATH;extensions" app.py
+python -m PyInstaller --add-data "$AHRS_UTILS_PATH;ahrs/utils" --add-data "$OB_EXTENSIONS_PATH;pyorbbecsdk/extensions" app.py
 
 # Create the tar.gz archive (requires tar in PATH)
 tar -czvf dist/dist.tar.gz dist/app
